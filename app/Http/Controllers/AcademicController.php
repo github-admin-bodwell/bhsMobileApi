@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Attendance;
 use App\Models\Semesters;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
@@ -11,58 +12,6 @@ class AcademicController extends Controller
 {
     use HttpResponse;
 
-    /*  
-        GET Academics
-            SELECT
-            course.SemesterID termId,
-            studentCourse.StudSubjID studentCourseId,
-            studentCourse.StudNum studentId,
-            studentCourse.SubjectID courseId,
-            course.SubjectName courseName,
-            staff.StaffID teacherId,
-            CONCAT(staff.FirstName, ' ', staff.LastName) teacherName,
-            staff.FirstName teacherFirstName,
-            staff.LastName teacherLastName,
-            course.PName provincialName,
-            course.CourseCd courseCode,
-            course.RoomNo roomNo,
-            course.Cap cap,
-            course.Spa spa,
-            course.Credit credit,
-            course.Type courseType
-            FROM tblBHSStudentSubject studentCourse
-            JOIN tblBHSSubject course ON studentCourse.SubjectID = course.SubjectID
-            JOIN tblStaff staff ON course.TeacherID = staff.StaffID
-            WHERE course.SemesterID=:termId AND studentCourse.StudNum=:studentId AND course.SubjectName NOT LIKE 'YYY%'
-            ORDER BY
-            course.Credit DESC,
-            course.SubjectName ASC
-
-        absent something
-        SELECT t.SemesterID, t.SubjectID, t.SubjectName, a.ADate, a.AbsencePeriod, a.LatePeriod, a.Excuse, a.Excusetxt
-        FROM tblBHSAttendance a
-        LEFT JOIN tblBHSStudentSubject s on a.StudSubjID = s.StudSubjID
-        LEFT JOIN tblBHSSubject t on t.SubjectID = s.SubjectID
-        WHERE s.StudNum = :studentId AND t.SemesterID = :SemesterID AND (a.AbsencePeriod != 0 OR a.LatePeriod != 0)
-        order by a.ADate desc",
-
-        // Past Term List
-        SELECT d.SemesterID, d.SemesterName
-            FROM tblBHSStudentSubject b
-            LEFT JOIN tblBHSSubject c ON b.SubjectID = c.SubjectID
-            LEFT JOIN tblBHSSemester d ON c.SemesterID = d.SemesterID
-            where StudNum = :studentId AND d.SemesterID<=:SemesterID
-            group by d.SemesterID, d.SemesterName
-            order by d.SemesterID desc",
-
-        // Absert Report List
-        SELECT t.SemesterID, t.SubjectID, t.SubjectName, a.ADate, a.AbsencePeriod, a.LatePeriod, a.Excuse, a.Excusetxt
-        FROM tblBHSAttendance a
-        LEFT JOIN tblBHSStudentSubject s on a.StudSubjID = s.StudSubjID
-        LEFT JOIN tblBHSSubject t on t.SubjectID = s.SubjectID
-        WHERE s.StudNum = :studentId AND t.SemesterID = :SemesterID AND (a.AbsencePeriod != 0 OR a.LatePeriod != 0)
-        order by a.ADate desc",
-    */
     public function getAcademics(Request $request) {
         $user = $request->user();
         $currentSemester = Semesters::getCurrentSemester();
@@ -96,11 +45,35 @@ class AcademicController extends Controller
                             ];
                         })
                         ->values();
+        // 2) Flatten to get the IN (...) list
+        $studentCourseList = $getAcademics
+            ->flatMap(fn ($g) => $g['data'])
+            ->pluck('studentCourseId')
+            ->unique()
+            ->values();
+
+        // 3) Attendance totals in ONE query (exactly your SQL semantics)
+        $attendance = DB::table('tblBHSAttendance')
+            ->selectRaw('StudSubjID AS studentCourseId, SUM(AbsencePeriod) AS absenceCount, SUM(LatePeriod) AS lateCount')
+            ->whereIn('StudSubjID', $studentCourseList)
+            ->groupBy('StudSubjID')
+            ->get()
+            ->keyBy('studentCourseId');
+
+        $groups = $getAcademics->map(function ($group) use ($attendance) {
+            $group['data'] = $group['data']->map(function ($row) use ($attendance) {
+                $totals = $attendance->get($row->studentCourseId);
+                $row->absenceCount = (int)($totals->absenceCount ?? 0);
+                $row->lateCount    = (int)($totals->lateCount ?? 0);
+                return $row;
+            });
+            return $group;
+        });
 
         return $this->successResponse(
             'Success',
             [ 
-                'academics' => $getAcademics
+                'academics' => $groups,
             ]
         );
     }

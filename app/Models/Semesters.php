@@ -9,7 +9,7 @@ class Semesters extends Model
     protected $table = 'tblBHSSemester';
     public $timestamps = false;
 
-    public static function getCurrentSemester() {
-        return self::where('CurrentSemester', 'Y')->first();
+    public static function getCurrentSemester($select = null) {
+        return self::select($select ?? '*')->where('CurrentSemester', 'Y')->first();
     }
 }

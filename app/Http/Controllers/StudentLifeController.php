@@ -69,6 +69,9 @@ class StudentLifeController extends Controller
 
         
         $byTitle = $activities->groupBy('CategoryTitle');
+        $totalCurrentHours = $activityHours->sum('CurrentHours');
+        $totalVLWEHours = $activityHours->sum('VLWEHours');
+
         $merged = $activityHours->map(function ($cat) use ($byTitle) {
             $cat->activities = ($byTitle->get($cat->CategoryTitle) ?? collect())->values();
             return $cat;
@@ -78,8 +81,10 @@ class StudentLifeController extends Controller
         return $this->successResponse(
             'Success',
             [ 
-                'semesterId' => $semesterId, 
-                'activities' => $merged
+                'semester' => $currentSemester, 
+                'activities' => $merged,
+                'totalCurrentHours' => number_format((float)$totalCurrentHours, 1, '.'),
+                'totalVLWEHours' => number_format((float)$totalVLWEHours, 1, '.')
             ]
         );
     }

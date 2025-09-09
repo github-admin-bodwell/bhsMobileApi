@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Parents;
+use App\Models\Semesters;
 use App\Models\Students;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
@@ -49,6 +50,9 @@ class AuthController extends Controller {
         $token = $user->createToken('mobile', $abilities, now()->addDay());
 
 
+        // current SemesterData
+        $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate' ]);
+
         return $this->successResponse(
             'Successfully Logged In',
             [
@@ -58,6 +62,7 @@ class AuthController extends Controller {
                     'lastname' => $user->LastName,
                     'role' => $role
                 ],
+                'semester' => $currentSemester,
                 '__t' => $token->plainTextToken
             ]
         );
