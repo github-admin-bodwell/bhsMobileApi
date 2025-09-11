@@ -45,14 +45,13 @@ class AcademicController extends Controller
                             ];
                         })
                         ->values();
-        // 2) Flatten to get the IN (...) list
+
         $studentCourseList = $getAcademics
             ->flatMap(fn ($g) => $g['data'])
             ->pluck('studentCourseId')
             ->unique()
             ->values();
 
-        // 3) Attendance totals in ONE query (exactly your SQL semantics)
         $attendance = DB::table('tblBHSAttendance')
             ->selectRaw('StudSubjID AS studentCourseId, SUM(AbsencePeriod) AS absenceCount, SUM(LatePeriod) AS lateCount')
             ->whereIn('StudSubjID', $studentCourseList)
@@ -72,7 +71,7 @@ class AcademicController extends Controller
 
         return $this->successResponse(
             'Success',
-            [ 
+            [
                 'academics' => $groups,
             ]
         );

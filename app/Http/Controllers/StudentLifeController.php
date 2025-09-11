@@ -53,7 +53,7 @@ class StudentLifeController extends Controller
                             'P.Location',
                             DB::raw('CONVERT(CHAR(10), A.SDate, 126) AS activityDate'),
                             'A.SDate AS startDate',
-                            'A.EDate AS endDate', 
+                            'A.EDate AS endDate',
                             'A.Body AS description',
                             'A.ApproverStaffID AS staffId',
                             'D.FirstName AS staffFirstName',
@@ -67,7 +67,7 @@ class StudentLifeController extends Controller
                             'A.VLWE AS VLWE'
                         ]);
 
-        
+
         $byTitle = $activities->groupBy('CategoryTitle');
         $totalCurrentHours = $activityHours->sum('CurrentHours');
         $totalVLWEHours = $activityHours->sum('VLWEHours');
@@ -80,8 +80,8 @@ class StudentLifeController extends Controller
 
         return $this->successResponse(
             'Success',
-            [ 
-                'semester' => $currentSemester, 
+            [
+                'semester' => $currentSemester,
                 'activities' => $merged,
                 'totalCurrentHours' => number_format((float)$totalCurrentHours, 1, '.'),
                 'totalVLWEHours' => number_format((float)$totalVLWEHours, 1, '.')

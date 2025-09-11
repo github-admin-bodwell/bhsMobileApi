@@ -49,7 +49,6 @@ class AuthController extends Controller {
 
         $token = $user->createToken('mobile', $abilities, now()->addDay());
 
-
         // current SemesterData
         $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate' ]);
 
@@ -81,7 +80,7 @@ class AuthController extends Controller {
                     'lastname' => $user->LastName
                 ]
             ]
-        ); 
+        );
     }
 
     public function logout(Request $request)
