@@ -8,6 +8,7 @@ use App\Models\Students;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller {
@@ -30,15 +31,31 @@ class AuthController extends Controller {
         // check Parent first
         $user = Parents::where('VerifiedEmail', $request->email)->first();
 
+        // hard code to update the pw1 in dev for Parents Only
+        // if( $user->UserID === '202300333' || $user->UserID === 202300333 ) {
+        //     $hashUpdate = Hash::make('bodwell');
+        //     $user->PW1 = $hashUpdate;
+        //     $user->save();
+        // }
+
         if( !$user ) {
             // check Student
             $user = Students::where('SchoolEmail', $request->email)->first();
             $role = 'student';
+
+            if( $user && ($user->HashPassword === '' || $user->HashPassword === null) ) {
+                // hash students password
+                $hashed = Hash::make($user->Password);
+
+                $user->HashPassword = $hashed;
+                $user->save(); // save hashed password
+            }
         }
 
         // then verify password
+        Log::debug("User Logs", ['user'=>$user]);
         if(!$user || !Hash::check($request->password, $user->getAuthPassword()) ) {
-            return $this->errorResponse('Credentials Mismatched');
+            return $this->errorResponse('Email Address or Password is invalid!');
         }
 
         $abilities = $role === 'parent'
