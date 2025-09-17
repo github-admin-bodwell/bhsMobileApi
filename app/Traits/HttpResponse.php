@@ -12,7 +12,9 @@ Trait HttpResponse {
             'status' => true,
             'message' => $message,
             'data' => $data
-        ], $code);
+        ], $code)
+        ->setEncodingOptions(JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION)
+        ->header('Content-Type', 'application/json');
     }
 
     protected function errorResponse($message = 'Something went wrong', $data = [], $error = null, $code = Response::HTTP_UNPROCESSABLE_ENTITY) : JsonResponse {
@@ -21,7 +23,9 @@ Trait HttpResponse {
             'message' => $message,
             'data' => $data,
             'error' => $error
-        ], $code);
+        ], $code)
+        ->setEncodingOptions(JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION)
+        ->header('Content-Type', 'application/json');
     }
 
 }

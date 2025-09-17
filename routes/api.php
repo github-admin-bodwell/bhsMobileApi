@@ -21,6 +21,7 @@ Route::middleware('auth:sanctum')->group(function() {
 
     // Academics
     Route::get('get-academics', [AcademicController::class, 'getAcademics']);
+    Route::post('get-academics/details', [AcademicController::class, 'getDetails']);
 
     // Student Life
     Route::get('get-student-life/{semesterId?}', [StudentLifeController::class, 'getStudentLife']);
