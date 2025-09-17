@@ -15,34 +15,38 @@ class StudentLifeController extends Controller
     public function getStudentLife(Request $request, $semesterId = null) {
         $user = $request->user();
         $currentSemester = Semesters::getCurrentSemester();
-        if( $semesterId === null ) {
-            $semesterId = $currentSemester->SemesterId;
-        }
 
-        $activityHours = DB::query()
-                        ->from('tblBHSSPStudentActivities', 'A')
-                        ->leftJoin('tblBHSSPActivityConfig AS C', 'C.ActivityCategory', 'A.ActivityCategory')
-                        ->where('A.StudentID', $user->StudentID ?? $user->UserID)
-                        ->where('A.SemesterID', 92)
-                        ->where('A.ActivityStatus', 80)
-                        ->groupBy(['A.ActivityCategory', 'C.Title', 'C.Body'])
-                        ->orderBy('A.ActivityCategory', 'ASC')
-                        ->get([
-                            'A.ActivityCategory',
-                            'C.Title AS CategoryTitle',
-                            'C.Body',
-                            DB::raw('SUM(CASE WHEN A.SemesterID=92 THEN A.Hours Else 0 End) AS CurrentHours'),
-                            DB::raw('SUM(A.Hours) AS AccumHours'),
-                            DB::raw('SUM(CASE WHEN A.SemesterID=92 AND A.VLWE = 1 THEN A.Hours Else 0 End) AS VLWEHours')
-                        ]);
+        if( $semesterId === null ) {
+            $semesterId = $currentSemester->SemesterID;
+        } 
+
+        $studentId = $user->StudentID ?? $user->UserID;
+
+        $activityHours = DB::table('tblBHSSPStudentActivities as A')
+            ->leftJoin('tblBHSSPActivityConfig as C', 'C.ActivityCategory', '=', 'A.ActivityCategory')
+            ->where('A.StudentID', $studentId)
+            ->where('A.SemesterID', '<=', $semesterId)
+            ->where('A.ActivityStatus', 80)
+            ->groupBy('A.ActivityCategory', 'C.Title', 'C.Body') 
+            ->orderBy('A.ActivityCategory', 'ASC')
+            ->selectRaw(
+                'A.ActivityCategory,
+                COALESCE(C.Title, \'\') AS CategoryTitle,
+                C.Body AS Body,
+                SUM(CASE WHEN A.SemesterID = ? THEN A.Hours ELSE 0 END) AS CurrentHours,
+                SUM(A.Hours) AS AccumHours,
+                SUM(CASE WHEN A.SemesterID = ? AND A.VLWE = 1 THEN A.Hours ELSE 0 END) AS VLWEHours',
+                [$semesterId, $semesterId]
+            )
+            ->get();
 
         $activities = DB::query()
                         ->from('tblBHSSPStudentActivities', 'A')
                         ->leftJoin('tblBHSSPActivity AS P', 'A.ActivityID', 'P.ActivityID')
                         ->leftJoin('tblStaff AS D', 'A.ApproverStaffID', 'D.StaffID')
                         ->leftJoin('tblBHSSPActivityConfig AS C', 'C.ActivityCategory', 'A.ActivityCategory')
-                        ->where('A.StudentID', $user->StudentID ?? $user->UserID)
-                        ->where('A.SemesterID', 92)
+                        ->where('A.StudentID', $studentId)
+                        ->where('A.SemesterID', '<=', $semesterId)
                         ->orderByDesc('A.SDate')
                         ->get([
                             'A.StudentActivityID AS activityId',
@@ -68,24 +72,27 @@ class StudentLifeController extends Controller
                         ]);
 
 
-        $byTitle = $activities->groupBy('CategoryTitle');
-        $totalCurrentHours = $activityHours->sum('CurrentHours');
-        $totalVLWEHours = $activityHours->sum('VLWEHours');
+        $byCategory = $activities->groupBy('category');
 
-        $merged = $activityHours->map(function ($cat) use ($byTitle) {
-            $cat->activities = ($byTitle->get($cat->CategoryTitle) ?? collect())->values();
+        $merged = $activityHours->map(function ($cat) use ($byCategory) {
+            $cat->activities = ($byCategory->get($cat->ActivityCategory) ?? collect())->values();
             return $cat;
         });
 
+        $totalCurrentHours = (float) $activityHours->sum('CurrentHours');
+        $totalVLWEHours    = (float) $activityHours->sum('VLWEHours');
 
-        return $this->successResponse(
-            'Success',
-            [
-                'semester' => $currentSemester,
-                'activities' => $merged,
-                'totalCurrentHours' => number_format((float)$totalCurrentHours, 1, '.'),
-                'totalVLWEHours' => number_format((float)$totalVLWEHours, 1, '.')
-            ]
-        );
+        return $this->successResponse('Success', [
+            'semester'          => $currentSemester,
+            'studentId'         => $studentId,
+            'semesterId'        => $semesterId,
+            'activities'        => $merged,
+            'raw'               => [
+                'activityHours' => $activityHours,
+                'activities'    => $activities,
+            ],
+            'totalCurrentHours' => number_format($totalCurrentHours, 1, '.'),
+            'totalVLWEHours'    => number_format($totalVLWEHours, 1, '.'),
+        ]);
     }
 }
