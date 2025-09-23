@@ -7,6 +7,7 @@ use App\Models\StudentActivties;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class StudentLifeController extends Controller
 {
@@ -46,7 +47,7 @@ class StudentLifeController extends Controller
                         ->leftJoin('tblStaff AS D', 'A.ApproverStaffID', 'D.StaffID')
                         ->leftJoin('tblBHSSPActivityConfig AS C', 'C.ActivityCategory', 'A.ActivityCategory')
                         ->where('A.StudentID', $studentId)
-                        ->where('A.SemesterID', '<=', $semesterId)
+                        ->where('A.SemesterID', '=', $semesterId)
                         ->orderByDesc('A.SDate')
                         ->get([
                             'A.StudentActivityID AS activityId',
@@ -82,17 +83,12 @@ class StudentLifeController extends Controller
         $totalCurrentHours = (float) $activityHours->sum('CurrentHours');
         $totalVLWEHours    = (float) $activityHours->sum('VLWEHours');
 
-        return $this->successResponse('Success', [
-            'semester'          => $currentSemester,
-            'studentId'         => $studentId,
-            'semesterId'        => $semesterId,
+        $payload = [
             'activities'        => $merged,
-            'raw'               => [
-                'activityHours' => $activityHours,
-                'activities'    => $activities,
-            ],
             'totalCurrentHours' => number_format($totalCurrentHours, 1, '.'),
             'totalVLWEHours'    => number_format($totalVLWEHours, 1, '.'),
-        ]);
+        ];
+
+        return $this->successResponse('Success', $payload);
     }
 }

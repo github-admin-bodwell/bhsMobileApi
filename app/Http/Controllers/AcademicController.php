@@ -167,9 +167,7 @@ class AcademicController extends Controller
 
         return $this->successResponse(
             'Success',
-            [
-                'academics' => $groups
-            ]
+            [ 'academics' => $groups ]
         );
     }
 
