@@ -63,12 +63,15 @@ class SyncInstagram extends Command
                     $posted       = $postedAt?->toDateTimeString();
 
                     $this->line("• Upserting IG {$igId} ({$mediaType})" . ($dry ? ' [DRY]' : ''));
+                    //$this->line("Caption for {$igId}: " . json_encode($caption, JSON_UNESCAPED_UNICODE)); for debugging
 
                     if ($dry) {
                         continue;
                     }
 
                     DB::transaction(function () use ($igId, $caption, $permalink, $posted, $mediaType, $mediaUrl, $thumb, $children) {
+                        //$this->line("Saving caption to DB: " . json_encode($caption, JSON_UNESCAPED_UNICODE)); for debugging
+
                         /** @var CommunityPost $post */
                         $post = CommunityPost::query()->updateOrCreate(
                             ['source' => 'instagram', 'source_post_id' => $igId],
@@ -82,6 +85,9 @@ class SyncInstagram extends Command
                                 ],
                             ]
                         );
+
+                        $check = CommunityPost::find($post->id);
+                        $this->line("DB stored caption: " . json_encode($check->caption, JSON_UNESCAPED_UNICODE));
 
                         // Clear & re-seed media for idempotency (simpler than diffing)
                         $post->media()->delete();

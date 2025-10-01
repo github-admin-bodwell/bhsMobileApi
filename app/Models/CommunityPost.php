@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\{MorphTo, HasMany, BelongsToMany};
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Support\Facades\DB;
 
 class CommunityPost extends Model
 {
@@ -22,6 +23,18 @@ class CommunityPost extends Model
         'like_count'  => 'integer',
         'comment_count' => 'integer',
     ];
+
+    public function setCaptionAttribute($value)
+    {
+        // Let normal flow handle NULL / empty
+        if ($value === null) {
+            $this->attributes['caption'] = null;
+            return;
+        }
+
+        // Wrap in raw expression: N'...' forces NVARCHAR
+        $this->attributes['caption'] = DB::raw("N'" . str_replace("'", "''", $value) . "'");
+    }
 
     public function author(): MorphTo { return $this->morphTo(); }
     public function media(): HasMany { return $this->hasMany(CommunityMedia::class, 'post_id'); }

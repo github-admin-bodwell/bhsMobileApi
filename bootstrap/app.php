@@ -18,11 +18,17 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->withSchedule(function (Schedule $schedule) {
+        // Sync Calendar from FinalSite
         $schedule->command('calendar:sync')
             ->hourly()
             ->withoutOverlapping()
             ->onOneServer();
 
+        // Refresh Long-Lived Token from Facebook
+        $schedule->command('fb:refresh-token')
+                 ->weekly();
+
+        // Sync Instagram feeds to database
         $schedule->command('community:sync-instagram --limit=150 --page-size=25')
             ->hourly()
             ->withoutOverlapping()

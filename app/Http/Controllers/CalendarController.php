@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\CalendarEvent;
 use App\Traits\HttpResponse;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
 
 class CalendarController extends Controller {
 
@@ -39,7 +40,7 @@ class CalendarController extends Controller {
             'description' => $e->description,
             'status'  => $e->status,
         ]);
-
+        Log::info('response', ['events'=>$events]);
         return $this->successResponse(
             'Sucecss',
             [ 'events' => $events ]
