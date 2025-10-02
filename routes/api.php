@@ -4,6 +4,7 @@ use App\Http\Controllers\AcademicController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\StudentLifeController;
+use App\Http\Controllers\StaffController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -25,4 +26,8 @@ Route::middleware('auth:sanctum')->group(function() {
 
     // Student Life
     Route::get('get-student-life/{semesterId?}', [StudentLifeController::class, 'getStudentLife']);
+
+    // 👇 NEW: Staff involved (SemesterID optional via route or query ?SemesterID=)
+    Route::get('get-staff-involved/{semesterId?}', [StaffController::class, 'getStaffInvolved']);
+
 });
