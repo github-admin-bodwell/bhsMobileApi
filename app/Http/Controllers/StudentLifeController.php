@@ -34,6 +34,7 @@ class StudentLifeController extends Controller
                 'A.ActivityCategory,
                 COALESCE(C.Title, \'\') AS CategoryTitle,
                 C.Body AS Body,
+                MIN(A.SemesterID) as FirstSemesterID,
                 SUM(CASE WHEN A.SemesterID = ? THEN A.Hours ELSE 0 END) AS CurrentHours,
                 SUM(A.Hours) AS AccumHours,
                 SUM(CASE WHEN A.SemesterID = ? AND A.VLWE = 1 THEN A.Hours ELSE 0 END) AS VLWEHours',
@@ -80,11 +81,15 @@ class StudentLifeController extends Controller
             return $cat;
         });
 
+        $lowestSemesterId = $merged->min('FirstSemesterID');
+        $since = Semesters::where('SemesterID', $lowestSemesterId)->first();
+
         $totalCurrentHours = (float) $activityHours->sum('CurrentHours');
         $totalVLWEHours    = (float) $activityHours->sum('VLWEHours');
 
         $payload = [
             'activities'        => $merged,
+            'since' => $since->SemesterName,
             'totalCurrentHours' => number_format($totalCurrentHours, 1, '.'),
             'totalVLWEHours'    => number_format($totalVLWEHours, 1, '.'),
         ];

@@ -35,6 +35,7 @@ Route::middleware('auth:sanctum')->group(function() {
 
     // Academics
     Route::get('get-academics', [AcademicController::class, 'getAcademics']);
+    Route::get('get-academics/attendance', [AcademicController::class, 'getAttendance']);
     Route::post('get-academics/details', [AcademicController::class, 'getDetails']);
 
     // Student Life
@@ -42,8 +43,8 @@ Route::middleware('auth:sanctum')->group(function() {
 
     // Community
     Route::prefix('community')->group(function() {
-        Route::middleware('throttle:10,1')->get('/posts', [FeedController::class, 'listPosts']);              // public/school feed
-        Route::get('/posts/{post}', [PostController::class, 'show']);
+        Route::middleware('throttle:10,1')->get('/posts', [FeedController::class, 'listPosts']);              // feed
+        // Route::get('/posts/{post}', [PostController::class, 'show']);
 
         // Route::post('/posts', [PostController::class, 'store']);
         // Route::post('/posts/{post}/react', [ReactionController::class, 'toggle']);
@@ -55,4 +56,7 @@ Route::middleware('auth:sanctum')->group(function() {
 
     // Calendar
     Route::get('calendar/events', [CalendarController::class, 'index']);
+
+    // Settings
+    Route::post('settings/change-password', [AuthController::class, 'changePassword']);
 });

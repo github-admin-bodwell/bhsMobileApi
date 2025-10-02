@@ -6,13 +6,22 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\CommunityPostResource;
 use App\Models\CommunityMedia;
 use App\Models\CommunityPost;
+use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class PostController extends Controller
 {
+    use HttpResponse;
+
     public function show(CommunityPost $post) {
         $post->load(['media' => fn($q)=>$q->orderBy('sort_order')]);
+
+        // return $this->successResponse(
+        //     'Success',
+        //     new CommunityPostResource($post)
+        // );
+
         return response()->json(['data' => new CommunityPostResource($post)]);
     }
 

@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
 class CommunityController extends Controller
 {
+    use HttpResponse;
+
     public function getInstagramPosts()
     {
         $token = config('services.instagram.token'); // store in config/services.php or .env
@@ -17,8 +20,13 @@ class CommunityController extends Controller
             'access_token' => $token,
         ]);
 
-        return response()->json([
-            'data' => $response->json()['data'] ?? []
-        ]);
+        return $this->successResponse(
+            'Status',
+            $response->json()['data'] ?? []
+        );
+        
+        // return response()->json([
+        //     'data' => $response->json()['data'] ?? []
+        // ]);
     }
 }

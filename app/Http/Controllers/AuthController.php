@@ -32,7 +32,7 @@ class AuthController extends Controller {
         $user = Parents::where('VerifiedEmail', $request->email)->first();
 
         // hard code to update the pw1 in dev for Parents Only
-        // if( $user->UserID === '202300333' || $user->UserID === 202300333 ) {
+        // if( $user->UserID === '202500076' || $user->UserID === 202500076 ) {
         //     $hashUpdate = Hash::make('bodwell');
         //     $user->PW1 = $hashUpdate;
         //     $user->save();
@@ -94,7 +94,8 @@ class AuthController extends Controller {
                 'user' => [
                     'studentId' => isset($user->StudentID) ? $user->StudentID : $user->UserID,
                     'firstname' => $user->FirstName,
-                    'lastname' => $user->LastName
+                    'lastname' => $user->LastName,
+                    'role' => $role
                 ]
             ]
         );
@@ -105,6 +106,51 @@ class AuthController extends Controller {
         $request->user()->currentAccessToken()?->delete();
         return $this->successResponse(
             'Success'
+        );
+    }
+
+    public function changePassword(Request $request) {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID;
+        $role = $user instanceof Parents ? 'parent' : 'student';
+
+        Log::info('Change Password attempt', ['role'=>$role, 'studentId'=>$studentId, 'now'=>now()]);
+
+        $validate = Validator::make($request->all(), [
+            'oldPassword' => 'required',
+            'newPassword' => 'required|min:8',
+            'confirmPassword' => 'required|same:newPassword'
+        ]);
+
+        if( $validate->fails() ) {
+            Log::info('Change Password attempt form error', ['role'=>$role, 'studentId'=>$studentId]);
+            return $this->errorResponse('Validation Error', $validate->errors());
+        }
+
+        if( !Hash::check($request->oldPassword, $user->getAuthPassword()) ) {
+            Log::info('Change Password attempt failed', ['role'=>$role, 'studentId'=>$studentId]);
+            return $this->errorResponse('Old password does not match!');
+        }
+
+        $hashUpdate = Hash::make($request->newPassword);
+
+        if( $role === 'parent' ) {
+            $user->PW1 = $hashUpdate;
+            $user->PW2 = $request->newPassword;
+            $user->save();
+            Log::info('Change Password save', ['date'=>now(), 'studentId'=>$studentId, 'fortherecord' => $request->newPassword]);
+        }
+
+        if( $role === 'student' ) {
+            $user->HashPassword = $hashUpdate;
+            $user->save();
+            Log::info('Change Password save', ['date'=>now(), 'studentId'=>$studentId, 'fortherecord' => $request->newPassword]);
+        }
+
+        // Send an email to notify the user for the changed password
+
+        return $this->successResponse(
+            'Successfully Updated Password',
         );
     }
 

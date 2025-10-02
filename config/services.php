@@ -42,6 +42,7 @@ return [
 
     'instagram' => [
         'user_id' => env('INSTAGRAM_USER_ID'),
+        'token' => ''
     ],
 
 ];

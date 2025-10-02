@@ -6,6 +6,7 @@ use App\Models\Attendance;
 use App\Models\Semesters;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -267,4 +268,37 @@ class AcademicController extends Controller
             [ 'details' => $rows, 'weight' => $weight ]
         );
     } 
+
+    public function getAttendance(Request $request) {
+        $user = $request->user();
+        $currentSemester = Semesters::getCurrentSemester();
+        $studentId = $user->StudentID ?? $user->UserID;
+
+        $records = Attendance::select(
+                            't.SemesterID',
+                            't.SubjectID',
+                            't.SubjectName',
+                            'tblBHSAttendance.ADate',
+                            'tblBHSAttendance.AbsencePeriod',
+                            'tblBHSAttendance.LatePeriod',
+                            'tblBHSAttendance.Excuse',
+                            'tblBHSAttendance.Excusetxt'
+                        )
+                        ->leftJoin('tblBHSStudentSubject as s', 'tblBHSAttendance.StudSubjID', '=', 's.StudSubjID')
+                        ->leftJoin('tblBHSSubject as t', 't.SubjectID', '=', 's.SubjectID')
+                        ->where('s.StudNum', $studentId)
+                        ->where('t.SemesterID', $currentSemester->SemesterID)
+                        ->where(function ($q) {
+                            $q->where('tblBHSAttendance.AbsencePeriod', '!=', 0)
+                            ->orWhere('tblBHSAttendance.LatePeriod', '!=', 0);
+                        })
+                        ->orderByDesc('tblBHSAttendance.ADate')
+                        ->get()
+                        ->groupBy('ADate');
+
+        return $this->successResponse(
+            'Success',
+            [ 'attendance' => $records ]
+        );
+    }
 }
