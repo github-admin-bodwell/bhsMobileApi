@@ -87,6 +87,8 @@ class AuthController extends Controller {
     public function me(Request $request) {
         $user = $request->user();
         $role = $user instanceof Parents ? 'parent' : 'student';
+        // current SemesterData
+        $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate' ]);
 
         return $this->successResponse(
             'Successfully Logged In',
@@ -96,7 +98,8 @@ class AuthController extends Controller {
                     'firstname' => $user->FirstName,
                     'lastname' => $user->LastName,
                     'role' => $role
-                ]
+                ],
+                'semester' => $currentSemester,
             ]
         );
     }
