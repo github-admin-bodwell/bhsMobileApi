@@ -12,6 +12,8 @@ use App\Http\Controllers\FeedController;
 use App\Http\Controllers\PostController;
 use App\Http\Controllers\ReactionController;
 use App\Http\Controllers\StudentLifeController;
+use App\Http\Controllers\StaffController;
+use App\Http\Controllers\FormsController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -59,5 +61,11 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 
     // Settings
     Route::post('settings/change-password', [AuthController::class, 'changePassword']);
+
+    // Staff Involved
+    Route::get('get-staff-involved/{semesterId?}', [StaffController::class, 'getStaffInvolved']);
+
+    // Forms
+    Route::post('forms/submit', [FormsController::class, 'submit']);
 
 });
