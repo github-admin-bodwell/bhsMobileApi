@@ -18,7 +18,7 @@ class AuthController extends Controller {
     public function login(Request $request) {
 
         $validate = Validator::make($request->all(), [
-            'email' => 'required|email',
+            'email' => 'required',
             'password' => 'required'
         ]);
 
@@ -29,7 +29,12 @@ class AuthController extends Controller {
         $role = 'parent';
 
         // check Parent first
-        $user = Parents::where('VerifiedEmail', $request->email)->first();
+        // Added ability to use PEN ID
+        if(filter_var($request->email, FILTER_VALIDATE_EMAIL)) {
+            $user = Parents::where('VerifiedEmail', $request->email)->first();
+        } else {
+            $user = Parents::where('LoginIDParent', $request->email)->first();
+        }
 
         // hard code to update the pw1 in dev for Parents Only
         // if( $user->UserID === '202500076' || $user->UserID === 202500076 ) {
@@ -67,7 +72,29 @@ class AuthController extends Controller {
         $token = $user->createToken('mobile', $abilities, now()->addDay());
 
         // current SemesterData
-        $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate' ]);
+        $currentSemester = Semesters::getCurrentSemester(
+            [ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate', 'StartDate', 'EndDate' ]
+        );
+
+        $today = date('Y-m-d');
+        $progressText = 'no_current_term';
+
+        if( $today < $currentSemester->StartDate ) {
+            $progressText = 'term_not_started';
+        } else if( $today >= $currentSemester->StartDate && $today < $currentSemester->MidCutOffDate ) {
+            $progressText = 'first_half';
+        } else if( $today >= $currentSemester->MidCutOffDate && $today <= $currentSemester->EndDate ) {
+            $progressText = 'second_half';
+        } else {
+            $progressText = 'end_of_term';
+        }
+
+        // add text to currentSemester
+        $currentSemester->progressText = $progressText;
+
+        if( $role === 'parent' ) {
+            // get Student Details
+        }
 
         return $this->successResponse(
             'Successfully Logged In',
