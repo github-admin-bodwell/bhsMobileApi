@@ -14,6 +14,7 @@ use App\Http\Controllers\ReactionController;
 use App\Http\Controllers\StudentLifeController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\FormsController;
+use App\Http\Controllers\StudentController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -34,7 +35,9 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
         Route::post('/logout', [AuthController::class, 'logout']);
     });
 
+    // Home
     Route::get('get-announcements', [AnnouncementController::class, 'getAnnouncements']);
+    Route::get('get-student-info', [StudentController::class, 'getStudentInfo']);
 
     // Academics
     Route::get('get-academics', [AcademicController::class, 'getAcademics']);

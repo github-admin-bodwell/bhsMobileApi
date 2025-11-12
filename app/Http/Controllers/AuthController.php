@@ -36,13 +36,6 @@ class AuthController extends Controller {
             $user = Parents::where('LoginIDParent', $request->email)->first();
         }
 
-        // hard code to update the pw1 in dev for Parents Only
-        // if( $user->UserID === '202500076' || $user->UserID === 202500076 ) {
-        //     $hashUpdate = Hash::make('bodwell');
-        //     $user->PW1 = $hashUpdate;
-        //     $user->save();
-        // }
-
         if( !$user ) {
             // check Student
             $user = Students::where('SchoolEmail', $request->email)->first();
@@ -57,8 +50,20 @@ class AuthController extends Controller {
             }
         }
 
+        if( $role === 'parent' && $user ) {
+            // check HashPassword first
+            if( !$user->HashPassword || $user->HashPassword === null) {
+                // create a hashpassword we can use and use their PW2 password
+                $hashPW2 = Hash::make($user->PW2);
+                //then update $user
+                $user->HashPassword = $hashPW2;
+                $user->save();
+            }
+        }
+
         // then verify password
         Log::debug("User Logs", ['user'=>$user]);
+
         if(!$user || !Hash::check($request->password, $user->getAuthPassword()) ) {
             return $this->errorResponse('Email Address or Password is invalid!');
         }

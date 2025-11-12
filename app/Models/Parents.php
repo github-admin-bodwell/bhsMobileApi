@@ -13,10 +13,10 @@ class Parents extends Authenticatable
     protected $primaryKey = 'LoginIDParent';
     public $timestamps = false;
 
-    protected $hidden = ['PW1'];
+    protected $hidden = ['HashPassword', 'PW1', 'PW2', 'PW3'];
 
     public function getAuthPassword()
     {
-        return $this->PW1;
+        return $this->HashPassword;
     }
 }
