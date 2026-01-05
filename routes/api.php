@@ -3,6 +3,7 @@
 use App\Http\Controllers\AcademicController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ByodController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\CommentController;
 use App\Http\Controllers\CommunityController;
@@ -15,14 +16,21 @@ use App\Http\Controllers\StudentLifeController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\FormsController;
 use App\Http\Controllers\StudentController;
+use App\Http\Controllers\LeaveRequestController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware('throttle:10,1')->post('/auth/login', [AuthController::class, 'login']);
-Route::middleware('throttle:10,1')->post('/auth/device/issue',  [DeviceTokenController::class, 'issue']); // public: uses deviceToken hash
+Route::get('/up', function () {
+    return response()->json([
+        'status' => 'ok',
+        'time' => now()->toIso8601String(),
+    ]);
+});
 
-Route::get('/auth/facebook/redirect', [FbAuthController::class, 'redirect'])->name('fb.redirect');
-Route::get('/auth/facebook/callback', [FbAuthController::class, 'callback'])->name('fb.callback');
+Route::middleware('throttle:10,1')->post('/auth/login', [AuthController::class, 'login']);
+Route::middleware('throttle:10,1')->post('/auth/sync-password', [AuthController::class, 'syncPassword']);
+Route::middleware('throttle:10,1')->post('/auth/portal-login', [AuthController::class, 'portalLogin']);
+Route::middleware('throttle:10,1')->post('/auth/device/issue',  [DeviceTokenController::class, 'issue']); // public: uses deviceToken hash
 
 Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 
@@ -70,5 +78,12 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 
     // Forms
     Route::post('forms/submit', [FormsController::class, 'submit']);
+
+    // Leave Requests
+    Route::get('get-leave-requests', [LeaveRequestController::class, 'index']);
+    Route::post('add-leave-request', [LeaveRequestController::class, 'store']);
+
+    // BYOD
+    Route::get('get-byod-voucher', [ByodController::class, 'voucher']);
 
 });
