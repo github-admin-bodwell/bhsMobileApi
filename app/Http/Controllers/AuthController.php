@@ -8,6 +8,7 @@ use App\Models\Semesters;
 use App\Models\Students;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -44,11 +45,18 @@ class AuthController extends Controller {
             $user = StudentAuth::where('LoginID', $request->email)->first();
         }
 
+        $isBoarding = false;
         if( $role === 'student' && $user ) {
             $this->processStudentLogin($user);
+
+            // get Residence from tblBHSHomestay
+            $residence = DB::table('tblBHSHomestay')->select('Residence')->where('StudentID', $user->UserID)->first();
+            if( $residence && $residence->Residence === 'Y' ) {
+                $isBoarding = true;
+            }
         }
 
-        
+
         if( $role === 'parent' && $user ) {
             $this->processParentLogin($user);
         }
@@ -58,7 +66,7 @@ class AuthController extends Controller {
         }
 
         // then verify password
-        Log::debug("User Logs", ['user'=>$user]);        
+        Log::debug("User Logs", ['user'=>$user]);
 
         $abilities = $role === 'parent'
                             ? [ 'parent:*' ]
@@ -96,7 +104,8 @@ class AuthController extends Controller {
                     'studentId' => isset($user->StudentID) ? $user->StudentID : $user->UserID,
                     'firstname' => $user->FirstName,
                     'lastname' => $user->LastName,
-                    'role' => $role
+                    'role' => $role,
+                    'boarding' => $isBoarding
                 ],
                 'semester' => $currentSemester,
                 '__t' => $token->plainTextToken
@@ -205,6 +214,18 @@ class AuthController extends Controller {
     public function me(Request $request) {
         $user = $request->user();
         $role = $user instanceof UserAuth ? 'parent' : 'student';
+        $isBoarding = false;
+
+        if ($role === 'student' && $user) {
+            $residence = DB::table('tblBHSHomestay')
+                ->select('Residence')
+                ->where('StudentID', $user->StudentID ?? $user->UserID)
+                ->first();
+
+            if ($residence && $residence->Residence === 'Y') {
+                $isBoarding = true;
+            }
+        }
         // current SemesterData
         $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate', 'StartDate', 'EndDate' ]);
 
@@ -231,7 +252,8 @@ class AuthController extends Controller {
                     'studentId' => isset($user->StudentID) ? $user->StudentID : $user->UserID,
                     'firstname' => $user->FirstName,
                     'lastname' => $user->LastName,
-                    'role' => $role
+                    'role' => $role,
+                    'boarding' => $isBoarding
                 ],
                 'semester' => $currentSemester,
             ]

@@ -5,10 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\Semesters;
 use App\Models\StudentActivties;
 use App\Traits\HttpResponse;
+use App\Mail\SelfSubmitHoursApprovalMail;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Validator;
 
 class StudentLifeController extends Controller
 {
@@ -240,5 +243,167 @@ class StudentLifeController extends Controller
                 'upcomingActivities'=> $upcomingActivities,
             ]
         );
+    }
+
+    public function submitSelfSubmitHours(Request $request) {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'activityName' => 'required|string',
+            'activityCategory' => 'required|string',
+            'activityLocation' => 'required|string',
+            'activitySDate' => 'required|string',
+            'activityEDate' => 'required|string',
+            'activityHours' => 'required',
+            'activityVLWE' => 'required',
+            'activityApprover' => 'required|string',
+            'activityComment1' => 'required|string',
+            'activityComment2' => 'required|string',
+            'activityComment3' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->errorResponse('Validation Error', $validator->errors());
+        }
+
+        try {
+            $activityName = trim((string) $request->input('activityName'));
+            $activityCategory = (string) $request->input('activityCategory');
+            $activityLocation = trim((string) $request->input('activityLocation'));
+            $activitySDate = Carbon::parse($request->input('activitySDate'))->format('Y-m-d');
+            $activityEDate = Carbon::parse($request->input('activityEDate'))->format('Y-m-d');
+            $activityHours = (string) $request->input('activityHours');
+            $activityVLWE = (string) $request->input('activityVLWE');
+            $activityApprover = (string) $request->input('activityApprover');
+            $activitySupervisor = (string) $request->input('activitySupervisor', '');
+            $activityComment1 = trim((string) $request->input('activityComment1'));
+            $activityComment2 = trim((string) $request->input('activityComment2'));
+            $activityComment3 = trim((string) $request->input('activityComment3'));
+
+            $semesterRow = DB::selectOne(
+                "SELECT TOP 1 SemesterID FROM tblBHSSemester WHERE ? >= StartDate AND ? < NextStartDate",
+                [$activitySDate, $activitySDate]
+            );
+            $semesterId = $semesterRow->SemesterID ?? Semesters::getCurrentSemester()?->SemesterID;
+
+            if (!$semesterId) {
+                return $this->errorResponse('Semester not found', [], null, 422);
+            }
+
+            $today = now()->format('Y-m-d');
+            $duplicate = DB::table('tblBHSSPStudentActivities')
+                ->where('StudentID', $studentId)
+                ->where('SemesterID', $semesterId)
+                ->where('ProgramSource', 'SELF')
+                ->where('Title', $activityName)
+                ->where('Location', $activityLocation)
+                ->whereRaw('CONVERT(CHAR(10), SDate, 126) = ?', [$activitySDate])
+                ->where('Hours', $activityHours)
+                ->where('ApproverStaffID', $activityApprover)
+                ->whereRaw('CONVERT(CHAR(10), CreateDate, 126) = ?', [$today])
+                ->count();
+
+            if ($duplicate > 0) {
+                return $this->successResponse('Duplicate submission', [
+                    'result' => 3,
+                    'message' => 'You have already submitted volunteer hours today.',
+                ]);
+            }
+
+            $inserted = DB::table('tblBHSSPStudentActivities')->insert([
+                'SemesterID' => $semesterId,
+                'ActivityStatus' => 60,
+                'StudentID' => $studentId,
+                'ActivityID' => 1000000,
+                'ProgramSource' => 'SELF',
+                'ActivityCategory' => $activityCategory,
+                'Title' => $activityName,
+                'Location' => $activityLocation,
+                'SDate' => $activitySDate,
+                'EDate' => $activityEDate,
+                'Hours' => $activityHours,
+                'AllDay' => 0,
+                'DPA' => 0,
+                'VLWE' => $activityVLWE,
+                'ApproverStaffID' => $activityApprover,
+                'CreateUserID' => $studentId,
+                'ModifyUserID' => $studentId,
+                'VLWESupervisor' => $activitySupervisor,
+                'SELFComment1' => $activityComment1,
+                'SELFComment2' => $activityComment2,
+                'SELFComment3' => $activityComment3,
+            ]);
+
+            if (!$inserted) {
+                return $this->errorResponse('Unable to submit hours', [], null, 500);
+            }
+
+            $approver = DB::table('tblStaff')
+                ->select('Email3', 'FirstName', 'LastName')
+                ->where('StaffID', $activityApprover)
+                ->first();
+
+            $student = DB::table('tblBHSStudent')
+                ->select('FirstName', 'LastName', 'EnglishName')
+                ->where('StudentID', $studentId)
+                ->first();
+
+            $approverEmail = $approver->Email3 ?? null;
+            $approverName = trim(($approver->FirstName ?? '') . ' ' . ($approver->LastName ?? ''));
+            $approverLabel = $approverName !== '' ? $approverName : $activityApprover;
+
+            $studentFirstName = $student->FirstName ?? $user->FirstName ?? '';
+            $studentLastName = $student->LastName ?? $user->LastName ?? '';
+            $studentEnglishName = $student->EnglishName ?? '';
+            $studentName = trim($studentFirstName . ($studentEnglishName ? " ({$studentEnglishName}) " : ' ') . $studentLastName);
+            if ($studentName === '') {
+                $studentName = (string) $studentId;
+            }
+
+            $mailRecipientEmail = config('app.env') === 'production'
+                ? $approverEmail
+                : 'rommel.parungao@bodwell.edu';
+
+            if ($mailRecipientEmail) {
+                try {
+                    Mail::to($mailRecipientEmail, $approverName ?: null)
+                        ->send(new SelfSubmitHoursApprovalMail(
+                            $studentName,
+                            $activityName,
+                            $activityLocation,
+                            $activitySDate,
+                            $activityHours,
+                            $approverLabel
+                        ));
+                } catch (\Throwable $e) {
+                    Log::warning('submitSelfSubmitHours email failed', [
+                        'err' => $e->getMessage(),
+                        'approverStaffId' => $activityApprover,
+                        'studentId' => $studentId,
+                    ]);
+                }
+            } else {
+                Log::warning('submitSelfSubmitHours approver email missing', [
+                    'approverStaffId' => $activityApprover,
+                    'studentId' => $studentId,
+                ]);
+            }
+
+            return $this->successResponse('Submitted', [
+                'result' => 1,
+                'message' => 'Your self-submit hours were submitted.',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('submitSelfSubmitHours error', [
+                'err' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->errorResponse('Server Error', [], null, 500);
+        }
     }
 }

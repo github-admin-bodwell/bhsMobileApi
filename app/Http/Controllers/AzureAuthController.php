@@ -61,7 +61,7 @@ class AzureAuthController extends Controller
             ]);
         }
 
-        $student = Students::where('SchoolEmail', $email)->first();
+        $student = Students::where('SchoolEmail', $email)->where('CurrentStudent', 'Y')->first();
         if (!$student) {
             return $this->redirectToApp($request, [
                 'error' => 'No matching student account found',

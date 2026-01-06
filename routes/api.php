@@ -56,6 +56,7 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 
     // Student Life
     Route::get('get-student-life/{semesterId?}', [StudentLifeController::class, 'getStudentLife']);
+    Route::post('add-self-submit-hours', [StudentLifeController::class, 'submitSelfSubmitHours']);
 
     // Community
     Route::prefix('community')->group(function() {
@@ -77,6 +78,7 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 
     // Staff Involved
     Route::get('get-staff-involved/{semesterId?}', [StaffController::class, 'getStaffInvolved']);
+    Route::get('get-approver-staff', [StaffController::class, 'getApproverStaffList']);
 
     // Forms
     Route::post('forms/submit', [FormsController::class, 'submit']);

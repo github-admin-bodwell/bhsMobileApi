@@ -138,5 +138,31 @@ class StaffController extends Controller
         }
     }
 
+    public function getApproverStaffList(Request $request)
+    {
+        try {
+            $approvers = DB::table('tblStaff')
+                ->select([
+                    'StaffID as staffId',
+                    DB::raw("CONCAT(FirstName, ' ', LastName) as fullName"),
+                    'PositionTitle2 as positionTitle',
+                    'Sex as sex',
+                ])
+                ->whereIn('RoleBOGS', ['10', '20', '21', '30', '31', '32', '40', '50'])
+                ->where('CurrentStaff', 'Y')
+                ->whereNotIn('StaffID', ['F2242', 'F2145'])
+                ->orderBy('FirstName')
+                ->get();
+
+            return $this->successResponse('Success', ['approvers' => $approvers]);
+        } catch (\Throwable $e) {
+            Log::error('getApproverStaffList error', [
+                'err' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->errorResponse('Server Error', 500);
+        }
+    }
+
     
 }
