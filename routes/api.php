@@ -3,6 +3,7 @@
 use App\Http\Controllers\AcademicController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\AzureAuthController;
 use App\Http\Controllers\ByodController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\CommentController;
@@ -31,6 +32,7 @@ Route::middleware('throttle:10,1')->post('/auth/login', [AuthController::class, 
 Route::middleware('throttle:10,1')->post('/auth/sync-password', [AuthController::class, 'syncPassword']);
 Route::middleware('throttle:10,1')->post('/auth/portal-login', [AuthController::class, 'portalLogin']);
 Route::middleware('throttle:10,1')->post('/auth/device/issue',  [DeviceTokenController::class, 'issue']); // public: uses deviceToken hash
+Route::middleware('throttle:10,1')->get('/auth/azure-redirect', [AzureAuthController::class, 'redirect']);
 
 Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 

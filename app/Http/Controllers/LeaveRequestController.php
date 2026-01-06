@@ -104,14 +104,17 @@ class LeaveRequestController extends Controller
             'doing' => ['nullable', 'string'],
         ]);
 
-        $startDate = $data['startDate'];
-        $endDate = $data['endDate'];
+        $startAt = Carbon::parse($data['startDate']);
+        $endAt = Carbon::parse($data['endDate']);
 
-        if (Carbon::parse($endDate)->lt(Carbon::parse($startDate))) {
+        if ($endAt->lt($startAt)) {
             return $this->errorResponse('endDate must be on or after startDate', [], null, 422);
         }
 
-        $leaveBan = $this->getStudentLeaveBan($studentId, $startDate, $endDate);
+        $startDateTime = $startAt->toDateTimeString();
+        $endDateTime = $endAt->toDateTimeString();
+
+        $leaveBan = $this->getStudentLeaveBan($studentId, $startAt->toDateString(), $endAt->toDateString());
         if (!empty($leaveBan)) {
             return $this->successResponse('Leave request blocked', [
                 'result' => 2,
@@ -119,11 +122,18 @@ class LeaveRequestController extends Controller
             ]);
         }
 
+        $conflicts = $this->getLeaveRequestConflicts($studentId, $startDateTime, $endDateTime);
+        if (!empty($conflicts)) {
+            return $this->errorResponse('Leave request conflicts with an existing request', [
+                'conflicts' => $conflicts,
+            ], null, 409);
+        }
+
         $leaveRequest = LeaveRequest::create([
             'LeaveType' => $data['leavetype'],
             'StudentID' => $studentId,
-            'SDate' => $startDate,
-            'EDate' => $endDate,
+            'SDate' => $startDateTime,
+            'EDate' => $endDateTime,
             'Reason' => $data['leaveReason'] ?? '',
             'Comment' => $data['comment'] ?? '',
             'ToDo' => $data['doing'] ?? '',
@@ -153,6 +163,23 @@ class LeaveRequestController extends Controller
                     });
             })
             ->get()
+            ->toArray();
+    }
+
+    private function getLeaveRequestConflicts(string $studentId, string $startDateTime, string $endDateTime): array
+    {
+        return LeaveRequest::query()
+            ->where('StudentID', $studentId)
+            ->where('LeaveStatus', '<>', 'R')
+            ->where(function ($query) use ($startDateTime, $endDateTime) {
+                $query->whereBetween('SDate', [$startDateTime, $endDateTime])
+                    ->orWhereBetween('EDate', [$startDateTime, $endDateTime])
+                    ->orWhere(function ($query) use ($startDateTime, $endDateTime) {
+                        $query->where('SDate', '<=', $startDateTime)
+                            ->where('EDate', '>=', $endDateTime);
+                    });
+            })
+            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
             ->toArray();
     }
 }
