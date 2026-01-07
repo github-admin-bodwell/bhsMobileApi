@@ -27,6 +27,14 @@ class StudentLifeController extends Controller
 
         $studentId = $user->StudentID ?? $user->UserID;
 
+        $pendingActivityHours = DB::table('tblBHSSPStudentActivities as A')->select('A.*', 'C.Title AS categoryTitle', 'S.FirstName AS StaffFirstName', 'S.LastName AS StaffLastName')
+            ->leftJoin('tblBHSSPActivityConfig as C', 'C.ActivityCategory', '=', 'A.ActivityCategory')
+            ->leftJoin('tblStaff as S', 'S.StaffID', '=', 'A.ApproverStaffID')
+            ->where('A.StudentID', $studentId)
+            ->where('A.SemesterID', '<=', $semesterId)
+            ->where('A.ActivityStatus', '<>', 80)
+            ->get();
+
         // --- HOURS SUMMARY PER CATEGORY (unchanged query)
         $activityHours = DB::table('tblBHSSPStudentActivities as A')
             ->leftJoin('tblBHSSPActivityConfig as C', 'C.ActivityCategory', '=', 'A.ActivityCategory')
@@ -235,12 +243,14 @@ class StudentLifeController extends Controller
             'Success',
             [
                 'studentId'         => $studentId,
+                'semester' => $semesterId,
                 'activities'        => $merged, // category blocks with unified student activities
                 'since'             => $since ?? "",
                 'totalCurrentHours' => number_format($totalCurrentHours, 1, '.'),
                 'totalVLWEHours'    => number_format($totalVLWEHours, 1, '.'),
                 'schoolActivities'  => $schoolActivities,
                 'upcomingActivities'=> $upcomingActivities,
+                'pendingActivities' => $pendingActivityHours,
             ]
         );
     }

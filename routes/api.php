@@ -18,6 +18,7 @@ use App\Http\Controllers\StaffController;
 use App\Http\Controllers\FormsController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\LeaveRequestController;
+use App\Http\Controllers\MealFeedbackController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -89,5 +90,10 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
 
     // BYOD
     Route::get('get-byod-voucher', [ByodController::class, 'voucher']);
+
+    // Meals
+    Route::get('get-meal', [MealFeedbackController::class, 'getMeal']);
+    Route::get('get-feedback', [MealFeedbackController::class, 'getFeedback']);
+    Route::post('add-feedback', [MealFeedbackController::class, 'addFeedback']);
 
 });
