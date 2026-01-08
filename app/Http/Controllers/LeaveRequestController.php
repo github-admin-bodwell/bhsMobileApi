@@ -40,6 +40,11 @@ class LeaveRequestController extends Controller
                 L.ApprovalStaff,
                 CONVERT(varchar, L.SDate, 120) AS StartDate,
                 CONVERT(varchar, L.EDate, 120) AS EndDate,
+                CONVERT(varchar, L.OutDate, 100) AS OutDate,
+                CONVERT(varchar, L.InDate, 100) AS InDate,
+                CONVERT(varchar, L.OutDate, 120) AS OutDateISO,
+                CONVERT(varchar, L.InDate, 120) AS InDateISO,
+                DATEDIFF(minute, L.OutDate, L.InDate) AS OutDurationMinutes,
                 CONVERT(varchar, L.SDate, 100) AS SDate,
                 CONVERT(varchar, L.EDate, 100) AS EDate,
                 CONCAT(S.FirstName, ' ', S.LastName) AS StaffFullName
