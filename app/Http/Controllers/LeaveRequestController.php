@@ -24,6 +24,15 @@ class LeaveRequestController extends Controller
             return $this->errorResponse('Missing studentId', [], null, 422);
         }
 
+        $dateFilter = $request->query('date');
+        if ($dateFilter) {
+            try {
+                $dateFilter = Carbon::parse($dateFilter)->toDateString();
+            } catch (\Exception $e) {
+                return $this->errorResponse('Invalid date filter', [], null, 422);
+            }
+        }
+
         $limit = (int) $request->query('limit', 0);
         $offset = (int) $request->query('offset', 0);
         $limit = $limit > 0 ? min($limit, 50) : 0;
@@ -54,6 +63,15 @@ class LeaveRequestController extends Controller
             ORDER BY L.CreateDate DESC";
 
         $params = ['studentId' => $studentId];
+
+        if ($dateFilter) {
+            $sql = str_replace(
+                'WHERE L.StudentID = :studentId',
+                'WHERE L.StudentID = :studentId AND CONVERT(date, L.OutDate) = :dateFilter',
+                $sql
+            );
+            $params['dateFilter'] = $dateFilter;
+        }
         $usePaging = $limit > 0;
         $limitPlusOne = $limit + 1;
 
@@ -89,6 +107,37 @@ class LeaveRequestController extends Controller
         }
 
         return $this->successResponse('Success', $payload);
+    }
+
+    public function currentBan(Request $request)
+    {
+        $user = $request->user();
+
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        $today = Carbon::now()->toDateString();
+
+        $sql = "
+            SELECT TOP 1
+                Comment,
+                CONVERT(varchar, FromDate, 100) AS FromDate,
+                CONVERT(varchar, ToDate, 100) AS ToDate
+            FROM tblBHSStudentLeaveBan
+            WHERE StudentID = :studentId
+              AND Status = 'A'
+              AND :today BETWEEN FromDate AND ToDate
+            ORDER BY FromDate DESC";
+
+        $rows = DB::select($sql, ['studentId' => $studentId, 'today' => $today]);
+        $ban = $rows[0] ?? null;
+
+        return $this->successResponse('Success', [
+            'hasBan' => (bool) $ban,
+            'ban' => $ban,
+        ]);
     }
 
     public function store(Request $request)
