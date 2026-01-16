@@ -13,10 +13,10 @@ class Students extends Authenticatable
     protected $primaryKey = 'StudentID';
     public $timestamps = false;
 
-    protected $hidden = ['HashPassword'];
+    protected $hidden = ['HashPassword', 'PW1'];
 
     public function getAuthPassword()
     {
-        return $this->HashPassword;
+        return $this->PW1;
     }
 }

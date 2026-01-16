@@ -294,7 +294,7 @@ class AuthController extends Controller {
         $hashUpdate = Hash::make($request->newPassword);
 
         if( $role === 'parent' ) {
-            $user->PW1 = $hashUpdate;
+            $user->HashPassword = $hashUpdate;
             $user->PW2 = $request->newPassword;
             $user->save();
             Log::info('Change Password save', ['date'=>now(), 'studentId'=>$studentId, 'fortherecord' => $request->newPassword]);
