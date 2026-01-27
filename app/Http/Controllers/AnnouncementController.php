@@ -14,9 +14,12 @@ class AnnouncementController extends Controller
 
     public function getAnnouncements(Request $request) {
 
-        $today = now(); // always the current date
+        $todayStart = now()->startOfDay();
+        $todayEnd = now()->endOfDay();
 
-        $dailyAnnouncements = Announcements::where('ADate', $today)->orderBy('DAID', 'DESC')->get();
+        $dailyAnnouncements = Announcements::whereBetween('ADate', [$todayStart, $todayEnd])
+            ->orderBy('DAID', 'DESC')
+            ->get();
 
         return $this->successResponse(
             'Annoucements retrieved successfull!',
