@@ -222,7 +222,7 @@ class StudentLifeController extends Controller
         $schoolActivities = $schoolActivitiesRaw->map($normalizeSchool)->values();
 
         // Upcoming: strictly future vs now, pick earliest 2
-        $now = '2025-09-01'; // Carbon::now();
+        $now = Carbon::now();
         $upcomingActivities = $schoolActivities
             ->filter(fn ($a) => $a->startDate && Carbon::parse($a->startDate)->greaterThan($now))
             ->sortBy('startDate')      // soonest first

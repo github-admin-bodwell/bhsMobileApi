@@ -17,7 +17,9 @@ class AnnouncementController extends Controller
 
         $today = Carbon::now()->format('F d, Y'); // always the current date
 
-        $dailyAnnouncements = Announcements::where('ADate', $today)->orderBy('DAID', 'DESC')->get();
+        $dailyAnnouncements = Announcements::whereBetween('ADate', $today)
+            ->orderBy('DAID', 'DESC')
+            ->get();
 
         return $this->successResponse(
             'Annoucements retrieved successfull!',
