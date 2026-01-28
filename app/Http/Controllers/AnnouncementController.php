@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Announcements;
 use App\Models\Semesters;
 use App\Traits\HttpResponse;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -14,7 +15,7 @@ class AnnouncementController extends Controller
 
     public function getAnnouncements(Request $request) {
 
-        $today = now(); // always the current date
+        $today = Carbon::now()->format('F d, Y'); // always the current date
 
         $dailyAnnouncements = Announcements::where('ADate', $today)->orderBy('DAID', 'DESC')->get();
 
