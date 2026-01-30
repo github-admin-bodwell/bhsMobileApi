@@ -49,6 +49,7 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
     // Home
     Route::get('get-announcements', [AnnouncementController::class, 'getAnnouncements']);
     Route::get('get-student-info', [StudentController::class, 'getStudentInfo']);
+    Route::get('get-class-schedule', [StudentController::class, 'getClassSchedule']);
 
     // Academics
     Route::get('get-academics', [AcademicController::class, 'getAcademics']);
