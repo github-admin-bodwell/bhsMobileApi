@@ -29,6 +29,29 @@ Route::get('/up', function () {
     ]);
 });
 
+Route::get('/app-version', function () {
+    $path = storage_path('app/app-version.json');
+    $fallback = [
+        'minSupportedBuild' => ['ios' => 0, 'android' => 0],
+        'latestBuild' => ['ios' => 0, 'android' => 0],
+        'storeUrl' => ['ios' => '', 'android' => ''],
+    ];
+
+    if (!file_exists($path)) {
+        return response()->json($fallback)->header('Cache-Control', 'no-store');
+    }
+
+    $raw = file_get_contents($path);
+    $data = json_decode($raw, true);
+
+    if (!is_array($data)) {
+        return response()->json($fallback)->header('Cache-Control', 'no-store');
+    }
+
+    return response()->json($data)->header('Cache-Control', 'no-store');
+});
+
+
 Route::middleware('throttle:10,1')->post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('throttle:10,1')->post('/auth/sync-password', [AuthController::class, 'syncPassword']);
 Route::middleware('throttle:10,1')->post('/auth/portal-login', [AuthController::class, 'portalLogin']);
