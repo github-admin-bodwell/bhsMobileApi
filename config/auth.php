@@ -36,6 +36,10 @@ return [
     */
 
     'guards' => [
+        'sanctum' => [
+            'driver' => 'sanctum',
+            'provider' => null,
+        ],
         'api' => [
             'driver' => 'sanctum',
             'provider' => null
