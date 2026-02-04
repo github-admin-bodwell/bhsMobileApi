@@ -55,8 +55,10 @@ class DeviceTokenController extends Controller
             return $this->errorResponse('Device Unauthorized', [], null, 401);
         }
         // Optional binding: require same device_id if present
-        if ($record->device_id && $deviceId && !hash_equals($record->device_id, $deviceId)) {
-            return $this->errorResponse('Device Mismatch', [], null, 401);
+        if ($record->device_id) {
+            if (!$deviceId || !hash_equals($record->device_id, $deviceId)) {
+                return $this->errorResponse('Device Mismatch', [], null, 401);
+            }
         }
 
         $record->last_used_at = now();
@@ -70,7 +72,7 @@ class DeviceTokenController extends Controller
         // kill older ATs (optional)
         $user->tokens()->delete();
 
-        $abilities = $this->abilitiesFor($user); // ["parent:*"] or ["student:*"]
+        $abilities = $this->abilitiesFor($record); // ["parent:*"] or ["student:*"]
         $access = $user->createToken('mobile', $abilities, now()->addDay());
 
         $currentSemester = Semesters::getCurrentSemester([
