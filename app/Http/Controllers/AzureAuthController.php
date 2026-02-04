@@ -16,6 +16,15 @@ class AzureAuthController extends Controller
 
     public function redirect(Request $request)
     {
+        Log::info('[Azure Login] Redirect entry', [
+            'has_error' => $request->has('error'),
+            'has_code' => $request->has('code'),
+            'redirect' => $request->query('redirect'),
+            'state' => $request->query('state'),
+            'error' => $request->query('error'),
+            'error_description' => $request->query('error_description'),
+        ]);
+
         if ($request->has('error')) {
             return $this->redirectToApp($request, [
                 'error' => $request->query('error_description') ?? 'Microsoft login failed',
@@ -28,6 +37,9 @@ class AzureAuthController extends Controller
 
         $redirectUrl = $request->query('redirect');
         if (!$this->isAllowedRedirect($redirectUrl)) {
+            Log::warning('[Azure Login] Invalid redirect URL', [
+                'redirect' => $redirectUrl,
+            ]);
             return $this->errorResponse('Invalid redirect URL', [], null, 422);
         }
 
@@ -41,6 +53,11 @@ class AzureAuthController extends Controller
 
     private function handleCallback(Request $request)
     {
+        Log::info('[Azure Login] Callback entry', [
+            'has_code' => $request->has('code'),
+            'state' => $request->query('state'),
+        ]);
+
         try {
             $azureUser = Socialite::driver('azure')->stateless()->user();
         } catch (\Throwable $e) {
@@ -56,6 +73,9 @@ class AzureAuthController extends Controller
             ?? ($azureUser->user['userPrincipalName'] ?? null);
 
         if (!$email) {
+            Log::warning('[Azure Login] Email not found in Azure profile', [
+                'azure_user' => $azureUser->user ?? null,
+            ]);
             return $this->redirectToApp($request, [
                 'error' => 'Microsoft account email not found',
             ]);
@@ -63,6 +83,9 @@ class AzureAuthController extends Controller
 
         $student = Students::where('SchoolEmail', $email)->where('CurrentStudent', 'Y')->first();
         if (!$student) {
+            Log::warning('[Azure Login] No matching student account', [
+                'email' => $email,
+            ]);
             return $this->redirectToApp($request, [
                 'error' => 'No matching student account found',
             ]);
@@ -89,6 +112,11 @@ class AzureAuthController extends Controller
             $currentSemester->progressText = $progressText;
         }
 
+        Log::info('[Azure Login] Success', [
+            'email' => $email,
+            'student_id' => $student->StudentID ?? null,
+        ]);
+
         return $this->redirectToApp($request, [
             'token' => $token->plainTextToken,
             'email' => $email,
@@ -99,10 +127,18 @@ class AzureAuthController extends Controller
     {
         $redirectUrl = $this->resolveRedirect($request);
         if (!$redirectUrl || !$this->isAllowedRedirect($redirectUrl)) {
+            Log::warning('[Azure Login] Missing/invalid redirect in callback', [
+                'redirect' => $redirectUrl,
+                'state' => $request->query('state'),
+            ]);
             return $this->errorResponse('Missing redirect URL', [], null, 422);
         }
 
         $separator = Str::contains($redirectUrl, '?') ? '&' : '?';
+        Log::info('[Azure Login] Redirecting to app', [
+            'redirect' => $redirectUrl,
+            'params' => array_keys($params),
+        ]);
         return redirect()->away($redirectUrl . $separator . http_build_query($params));
     }
 
