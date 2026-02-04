@@ -28,6 +28,12 @@ register_shutdown_function(function (): void {
     );
 
     error_log($msg);
+
+    $tempDir = sys_get_temp_dir();
+    if (is_string($tempDir) && $tempDir !== '') {
+        $tempLog = rtrim($tempDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'laravel-boot.log';
+        @file_put_contents($tempLog, $msg . PHP_EOL, FILE_APPEND);
+    }
 });
 
 // Determine if the application is in maintenance mode...
@@ -38,7 +44,13 @@ if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php'))
 // Register the Composer autoloader...
 $autoload = __DIR__.'/../vendor/autoload.php';
 if (!file_exists($autoload)) {
-    error_log('BOOT ERROR: Missing vendor/autoload.php');
+    $msg = 'BOOT ERROR: Missing vendor/autoload.php';
+    error_log($msg);
+    $tempDir = sys_get_temp_dir();
+    if (is_string($tempDir) && $tempDir !== '') {
+        $tempLog = rtrim($tempDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'laravel-boot.log';
+        @file_put_contents($tempLog, $msg . PHP_EOL, FILE_APPEND);
+    }
     http_response_code(500);
     echo 'Server error';
     exit(1);
@@ -49,7 +61,13 @@ require $autoload;
 /** @var Application $app */
 $bootstrap = __DIR__.'/../bootstrap/app.php';
 if (!file_exists($bootstrap)) {
-    error_log('BOOT ERROR: Missing bootstrap/app.php');
+    $msg = 'BOOT ERROR: Missing bootstrap/app.php';
+    error_log($msg);
+    $tempDir = sys_get_temp_dir();
+    if (is_string($tempDir) && $tempDir !== '') {
+        $tempLog = rtrim($tempDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'laravel-boot.log';
+        @file_put_contents($tempLog, $msg . PHP_EOL, FILE_APPEND);
+    }
     http_response_code(500);
     echo 'Server error';
     exit(1);
