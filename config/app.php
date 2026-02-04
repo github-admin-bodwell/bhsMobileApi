@@ -40,9 +40,6 @@ return [
     */
 
     'debug' => (bool) env('APP_DEBUG', false),
-    'debug_stacktrace' => (bool) env('DEBUG_STACKTRACE', false),
-    'debug_stacktrace_token' => env('DEBUG_STACKTRACE_TOKEN'),
-    'debug_stacktrace_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('DEBUG_STACKTRACE_IPS', ''))))),
 
     /*
     |--------------------------------------------------------------------------

@@ -35,22 +35,6 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // Helper: detect API request
         $isApi = fn ($request) => $request->is('api/*') || $request->expectsJson();
-        $shouldExposeTrace = function ($request): bool {
-            if (!config('app.debug_stacktrace', false)) {
-                return false;
-            }
-
-            $token = (string) config('app.debug_stacktrace_token', '');
-            if ($token !== '') {
-                $headerToken = (string) $request->header('X-Debug-Token', '');
-                if ($headerToken !== '' && hash_equals($token, $headerToken)) {
-                    return true;
-                }
-            }
-
-            $ips = config('app.debug_stacktrace_ips', []);
-            return !empty($ips) && in_array($request->ip(), $ips, true);
-        };
         
         $exceptions->shouldRenderJsonWhen(function ($request) {
             return $request->is('api/*')
@@ -161,37 +145,13 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Catch-all for anything else -> JSON 500
-        $exceptions->render(function (Throwable $e, $request) use ($isApi, $shouldExposeTrace) {
+        $exceptions->render(function (Throwable $e, $request) use ($isApi) {
             if ($isApi($request)) {
                 report($e);
-                $debug = null;
-                if ($shouldExposeTrace($request)) {
-                    $trace = array_slice($e->getTrace(), 0, 20);
-                    $trace = array_map(function (array $t): array {
-                        return [
-                            'file' => $t['file'] ?? null,
-                            'line' => $t['line'] ?? null,
-                            'class' => $t['class'] ?? null,
-                            'function' => $t['function'] ?? null,
-                        ];
-                    }, $trace);
-
-                    $debug = [
-                        'exception' => get_class($e),
-                        'message' => $e->getMessage(),
-                        'file' => $e->getFile(),
-                        'line' => $e->getLine(),
-                        'trace' => $trace,
-                    ];
-                }
-                $payload = [
+                return response()->json([
                     'status'  => false,
                     'message' => config('app.debug') ? ($e->getMessage() ?: 'Server error') : 'Server error',
-                ];
-                if ($debug !== null) {
-                    $payload['debug'] = $debug;
-                }
-                return response()->json($payload, 500);
+                ], 500);
             }
         });
     })->withSchedule(function (Schedule $schedule) {
