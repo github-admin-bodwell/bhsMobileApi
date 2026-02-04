@@ -34,12 +34,12 @@ class AuthController extends Controller {
         // check Parent first
         // Added ability to use PEN ID
         if( $role === 'parent' ) {
-            if(filter_var($request->email, FILTER_VALIDATE_EMAIL)) {
-                $user = UserAuth::where('VerifiedEmail', $request->email)->first();
-            } else {
+            // if(filter_var($request->email, FILTER_VALIDATE_EMAIL)) {
+            //     $user = UserAuth::where('VerifiedEmail', $request->email)->first();
+            // } else {
                 // Parents uses PEN ID
                 $user = UserAuth::where('LoginIDParent', $request->email)->first();
-            }
+            //}
         } else {
             // student
             $user = StudentAuth::where('LoginID', $request->email)->first();
