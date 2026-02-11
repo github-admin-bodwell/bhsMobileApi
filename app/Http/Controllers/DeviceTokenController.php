@@ -8,6 +8,7 @@ use App\Models\Semesters;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class DeviceTokenController extends Controller
@@ -20,17 +21,31 @@ class DeviceTokenController extends Controller
         $user = $request->user(); // Sanctum AT-protected
         if (!$user) return $this->errorResponse('Unauthorized', [], null, 401);
 
+        $deviceName = $request->string('deviceName')->toString() ?: null;
+        $deviceId = $request->string('deviceId')->toString() ?: null;
+
         $plain = 'dt_' . Str::random(64);                  // plaintext
         $hashed = hash('sha256', $plain);                  // store only hash
 
         $dt = DeviceToken::create([
             'tokenable_id' => $user->getKey(),
             'tokenable_type' => get_class($user),         // Parents or Student
-            'name' => $request->string('deviceName')->toString() ?: null,
-            'device_id' => $request->string('deviceId')->toString() ?: null,
+            'name' => $deviceName,
+            'device_id' => $deviceId,
             'token' => $hashed,
             'abilities' => ['device.issue'],
             'expires_at' => null,                         // or now()->addMonths(12)
+            'ip' => $request->ip(),
+            'user_agent' => (string) $request->userAgent(),
+        ]);
+
+        Log::info('[DeviceToken] Enabled', [
+            'token_id' => $dt->getKey(),
+            'user_id' => $user->getKey(),
+            'user_type' => get_class($user),
+            'role' => $this->roleFor($user),
+            'device_id' => $deviceId,
+            'device_name' => $deviceName,
             'ip' => $request->ip(),
             'user_agent' => (string) $request->userAgent(),
         ]);
@@ -50,13 +65,33 @@ class DeviceTokenController extends Controller
         $hashed = hash('sha256', $plain);
         $deviceId = $request->string('deviceId')->toString() ?: null;
 
+        Log::info('[DeviceToken] Issue attempt', [
+            'device_id' => $deviceId,
+            'token_prefix' => substr($hashed, 0, 8),
+            'ip' => $request->ip(),
+            'user_agent' => (string) $request->userAgent(),
+        ]);
+
         $record = DeviceToken::where('token', $hashed)->first();
         if (!$record || !$record->isValid()) {
+            Log::warning('[DeviceToken] Issue failed: invalid token', [
+                'device_id' => $deviceId,
+                'token_prefix' => substr($hashed, 0, 8),
+                'ip' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+            ]);
             return $this->errorResponse('Device Unauthorized', [], null, 401);
         }
         // Optional binding: require same device_id if present
         if ($record->device_id) {
             if (!$deviceId || !hash_equals($record->device_id, $deviceId)) {
+                Log::warning('[DeviceToken] Issue failed: device mismatch', [
+                    'token_id' => $record->getKey(),
+                    'record_device_id' => $record->device_id,
+                    'device_id' => $deviceId,
+                    'ip' => $request->ip(),
+                    'user_agent' => (string) $request->userAgent(),
+                ]);
                 return $this->errorResponse('Device Mismatch', [], null, 401);
             }
         }
@@ -89,6 +124,17 @@ class DeviceTokenController extends Controller
             $newDeviceToken = $newPlain;
         }
 
+        Log::info('[DeviceToken] Issued', [
+            'token_id' => $record->getKey(),
+            'user_id' => $user->getKey(),
+            'user_type' => get_class($user),
+            'role' => $this->roleFor($user),
+            'device_id' => $record->device_id,
+            'rotated' => (bool) $newDeviceToken,
+            'ip' => $request->ip(),
+            'user_agent' => (string) $request->userAgent(),
+        ]);
+
         return $this->successResponse(
             'Success',
             [
@@ -119,6 +165,16 @@ class DeviceTokenController extends Controller
         if ($deviceId) $q->where('device_id', $deviceId);
 
         $count = $q->delete();
+
+        Log::info('[DeviceToken] Disabled', [
+            'user_id' => $user->getKey(),
+            'user_type' => get_class($user),
+            'role' => $this->roleFor($user),
+            'device_id' => $deviceId,
+            'revoked' => $count > 0,
+            'ip' => $request->ip(),
+            'user_agent' => (string) $request->userAgent(),
+        ]);
 
         return $this->successResponse(
             'Revoked Authorization',
