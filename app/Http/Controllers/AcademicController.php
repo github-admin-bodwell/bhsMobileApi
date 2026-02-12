@@ -6,6 +6,7 @@ use App\Models\Attendance;
 use App\Models\Semesters;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -15,12 +16,54 @@ class AcademicController extends Controller
 {
     use HttpResponse;
 
-    public function getAcademics(Request $request) {
+    private function guardAcademicAccess(
+        Request $request,
+        ?string $semesterId = null,
+        bool $allowPastWhenDisabled = false
+    )
+    {
         $user = $request->user();
-        $currentSemester = Semesters::getCurrentSemester();
-        $studentId = $user->StudentID ?? $user->UserID;
+        if (!$user) {
+            return $this->errorResponse('Unauthorized', [], null, 401);
+        }
 
-        Log::debug('request data', ['request' => $request]);
+        $studentId = $user->StudentID ?? $user->UserID;
+        if (!$studentId) {
+            return $this->errorResponse('Unauthorized', [], null, 401);
+        }
+
+        $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'BOGSEnable' ]);
+        if (!$currentSemester) {
+            return $this->errorResponse('No current semester', [], null, 403);
+        }
+
+        $currentSemesterId = (int)$currentSemester->SemesterID;
+        $requestedSemesterId = $semesterId !== null ? (int)$semesterId : null;
+        $bogsEnabled = strtoupper((string)$currentSemester->BOGSEnable) === 'Y';
+
+        if ($requestedSemesterId !== null) {
+            if ($requestedSemesterId > $currentSemesterId) {
+                return $this->errorResponse('Invalid semester', [ 'code' => 'invalid_semester' ], null, 403);
+            }
+
+            if ($requestedSemesterId === $currentSemesterId && !$bogsEnabled) {
+                return $this->errorResponse('Grades not available', [ 'code' => 'grades_disabled' ], null, 403);
+            }
+        } else if (!$allowPastWhenDisabled && !$bogsEnabled) {
+            return $this->errorResponse('Grades not available', [ 'code' => 'grades_disabled' ], null, 403);
+        }
+
+        return [ $studentId, $currentSemester, $bogsEnabled ];
+    }
+
+    public function getAcademics(Request $request) {
+        $guard = $this->guardAcademicAccess($request, null, true);
+        if ($guard instanceof JsonResponse) {
+            return $guard;
+        }
+        [$studentId, $currentSemester, $bogsEnabled] = $guard;
+
+        Log::debug('request data', ['request' => $request, 'guard'=>$guard]);
 
         $categoryRatePerCat = DB::table('tblBHSOGSGrades as grade')
             ->join('tblBHSOGSCategoryItems as item', 'grade.CategoryItemID', '=', 'item.CategoryItemID')
@@ -73,51 +116,59 @@ class AcademicController extends Controller
             ]);
 
         // course-list
-        $getAcademics = DB::query()
-                        ->from('tblBHSStudentSubject AS studentCourse')
-                        ->join('tblBHSSubject AS course', 'studentCourse.SubjectID', 'course.SubjectID')
-                        ->join('tblStaff AS staff', 'course.TeacherID', 'staff.StaffID')
-                        ->join('tblBHSSemester AS semester', 'course.SemesterID', 'semester.SemesterID')
-                        ->leftJoinSub($courseRates, 'cr', function ($join) use ($studentId) {
-                            $join->on('cr.courseId', '=', 'studentCourse.SubjectID')
-                                ->on('cr.semesterId', '=', 'course.SemesterID')
-                                ->where('cr.studentId', '=', $studentId);
-                        })
-                        ->where('course.SemesterID', '<=', $currentSemester->SemesterID)
-                        ->where('studentCourse.StudNum', $studentId)
-                        ->whereNotLike('course.SubjectName', 'YYY%')
-                        ->orderByDesc('course.Credit')
-                        ->get([
-                            'course.SemesterID AS semesterId',
-                            'course.Type AS courseType',
-                            'semester.SemesterName AS semesterName',
-                            'studentCourse.StudSubjID AS studentCourseId',
-                            'studentCourse.StudNum AS studentId',
-                            'studentCourse.SubjectID AS courseId',
-                            'course.SubjectName AS courseName',
-                            'staff.StaffID AS teacherId',
-                            'staff.Photo AS staffPhoto',
-                            'staff.FirstName AS teacherFirstName',
-                            'staff.LastName AS teacherLastName',
+        $courseRows = DB::query()
+            ->from('tblBHSStudentSubject AS studentCourse')
+            ->join('tblBHSSubject AS course', 'studentCourse.SubjectID', 'course.SubjectID')
+            ->join('tblStaff AS staff', 'course.TeacherID', 'staff.StaffID')
+            ->join('tblBHSSemester AS semester', 'course.SemesterID', 'semester.SemesterID')
+            ->leftJoinSub($courseRates, 'cr', function ($join) use ($studentId) {
+                $join->on('cr.courseId', '=', 'studentCourse.SubjectID')
+                    ->on('cr.semesterId', '=', 'course.SemesterID')
+                    ->where('cr.studentId', '=', $studentId);
+            })
+            ->where('course.SemesterID', $bogsEnabled ? '<=' : '<', $currentSemester->SemesterID)
+            ->where('studentCourse.StudNum', $studentId)
+            ->whereNotLike('course.SubjectName', 'YYY%')
+            ->orderByDesc('course.Credit')
+            ->get([
+                'course.SemesterID AS semesterId',
+                'course.Type AS courseType',
+                'semester.SemesterName AS semesterName',
+                'studentCourse.StudSubjID AS studentCourseId',
+                'studentCourse.StudNum AS studentId',
+                'studentCourse.SubjectID AS courseId',
+                'course.SubjectName AS courseName',
+                'staff.StaffID AS teacherId',
+                'staff.Photo AS staffPhoto',
+                'staff.FirstName AS teacherFirstName',
+                'staff.LastName AS teacherLastName',
 
-                            DB::raw('COALESCE(cr.categoryCount, 0)        AS categoryCount'),
-                            DB::raw('COALESCE(cr.categoryWeightTotal, 0)  AS categoryWeightTotal'),
-                            DB::raw('COALESCE(cr.courseRateOrigin, 0)     AS courseRateOrigin'),
-                            DB::raw('COALESCE(cr.courseRateScaled, 0)     AS courseRateScaled'),
-                            DB::raw('cr.LtrGradeFinal                      AS ltrGradeFinal'),
-                            DB::raw('COALESCE(cr.credit, course.Credit)    AS creditComputed'),
-                        ])
-                        ->groupBy('semesterId')
-                        ->sortByDesc(function ($items, $semesterId) { 
-                            return $semesterId;
-                        })
-                        ->map(function($items, $semsterId) {
-                            return [
-                                'title' => $items->first()->semesterName,
-                                'courses' => $items->values(),
-                            ];
-                        })
-                        ->values();
+                DB::raw('COALESCE(cr.categoryCount, 0)        AS categoryCount'),
+                DB::raw('COALESCE(cr.categoryWeightTotal, 0)  AS categoryWeightTotal'),
+                DB::raw('COALESCE(cr.courseRateOrigin, 0)     AS courseRateOrigin'),
+                DB::raw('COALESCE(cr.courseRateScaled, 0)     AS courseRateScaled'),
+                DB::raw('cr.LtrGradeFinal                      AS ltrGradeFinal'),
+                DB::raw('COALESCE(cr.credit, course.Credit)    AS creditComputed'),
+            ]);
+
+        $grouped = $courseRows->groupBy('semesterId');
+
+        if (!$bogsEnabled && !$grouped->has($currentSemester->SemesterID)) {
+            $grouped->put($currentSemester->SemesterID, collect());
+        }
+
+        $getAcademics = $grouped
+            ->sortByDesc(function ($items, $semesterId) { 
+                return $semesterId;
+            })
+            ->map(function($items, $semsterId) use ($currentSemester) {
+                $semesterName = $items->first()->semesterName ?? $currentSemester->SemesterName;
+                return [
+                    'title' => $semesterName,
+                    'courses' => $items->values(),
+                ];
+            })
+            ->values();
 
         $studentCourseList = $getAcademics
             ->flatMap(fn ($g) => $g['courses'])
@@ -173,9 +224,6 @@ class AcademicController extends Controller
     }
 
     public function getDetails(Request $request) {        
-        $user = $request->user();
-
-
         $validate = Validator::make($request->all(), [
             'courseId' => "required",
             'semesterId' => "required"
@@ -185,9 +233,14 @@ class AcademicController extends Controller
             return $this->errorResponse('Validation Error', $validate->errors());
         }
 
-        $studentId = $user->StudentID ?? $user->UserID;
         $semesterId = $request->semesterId;
         $courseId = $request->courseId;
+
+        $guard = $this->guardAcademicAccess($request, $semesterId);
+        if ($guard instanceof JsonResponse) {
+            return $guard;
+        }
+        [$studentId, $currentSemester] = $guard;
 
         $rows = DB::table('tblBHSStudentSubject as studentCourse')
             ->join('tblBHSSubject as course', 'studentCourse.SubjectID', '=', 'course.SubjectID')
@@ -270,9 +323,11 @@ class AcademicController extends Controller
     } 
 
     public function getAttendance(Request $request) {
-        $user = $request->user();
-        $currentSemester = Semesters::getCurrentSemester();
-        $studentId = $user->StudentID ?? $user->UserID;
+        $guard = $this->guardAcademicAccess($request);
+        if ($guard instanceof JsonResponse) {
+            return $guard;
+        }
+        [$studentId, $currentSemester, $bogsEnabled] = $guard;
 
         $records = Attendance::select(
                             't.SemesterID',

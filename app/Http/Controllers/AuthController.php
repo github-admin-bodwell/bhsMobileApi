@@ -78,7 +78,7 @@ class AuthController extends Controller {
 
         // current SemesterData
         $currentSemester = Semesters::getCurrentSemester(
-            [ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate', 'StartDate', 'EndDate' ]
+            [ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate', 'StartDate', 'EndDate', 'BOGSEnable' ]
         );
 
         $today = date('Y-m-d');
@@ -227,7 +227,9 @@ class AuthController extends Controller {
             }
         }
         // current SemesterData
-        $currentSemester = Semesters::getCurrentSemester([ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate', 'StartDate', 'EndDate' ]);
+        $currentSemester = Semesters::getCurrentSemester(
+            [ 'SemesterID', 'SemesterName', 'FExam1', 'FExam2', 'MidCutOffDate', 'StartDate', 'EndDate', 'BOGSEnable' ]
+        );
 
         $today = date('Y-m-d');
         $progressText = 'no_current_term';
