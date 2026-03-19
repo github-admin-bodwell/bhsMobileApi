@@ -22,5 +22,6 @@ class LeaveRequest extends Model
         'LeaveStatus',
         'ModifyUserID',
         'CreateUserID',
+        'Source'
     ];
 }

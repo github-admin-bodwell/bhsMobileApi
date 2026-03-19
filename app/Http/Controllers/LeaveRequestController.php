@@ -195,6 +195,7 @@ class LeaveRequestController extends Controller
             'LeaveStatus' => 'P',
             'ModifyUserID' => $studentId,
             'CreateUserID' => $studentId,
+            'Source' => 'mobile'
         ]);
 
         return $this->successResponse('Leave request submitted', [
