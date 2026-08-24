@@ -8,6 +8,7 @@ use App\Models\Semesters;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class DeviceTokenController extends Controller
@@ -44,6 +45,32 @@ class DeviceTokenController extends Controller
     // POST /auth/device/issue  (public; called with device token)
     // body: { deviceToken: string, deviceId?: string, rotate?: bool }
     public function issue(Request $request) {
+        // Biometric login is dormant until the next major release.
+        //
+        // Answer 410 rather than 401. The mobile client treats any non-auth 401 as a
+        // session expiry: it emits `unauthorized`, the root layout does
+        // router.replace("/login"), the login screen remounts, its "already attempted"
+        // guard resets, and the auto-unlock fires again — an infinite biometric prompt
+        // loop on clients still running the pre-4.2.0 bundle. 410 breaks that cycle and
+        // leaves one dismissible alert instead.
+        //
+        // See 2026-08-18-pre-semester-remediation.md (finding P0-1, task A1).
+        if (!config('features.biometric_login')) {
+            // Also serves as the stale-bundle counter (task A3): every hit here is a
+            // device still running the February bundle.
+            Log::info('[Device Token] issue called while biometric login is disabled', [
+                'ip' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+            ]);
+
+            return $this->errorResponse(
+                'Biometric sign-in is not available in this version. Please sign in with your password.',
+                [],
+                null,
+                410
+            );
+        }
+
         $plain = (string) $request->input('deviceToken');
         if (!$plain) return $this->errorResponse('Missing Authorization', [], null, 422);
 
