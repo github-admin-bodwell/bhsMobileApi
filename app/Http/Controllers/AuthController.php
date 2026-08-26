@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DeviceToken;
 use App\Models\UserAuth;
 use App\Models\StudentAuth;
 use App\Models\Semesters;
@@ -136,6 +137,7 @@ class AuthController extends Controller {
             $student->PW1 = Hash::make($request->password);
             $student->PW3 = $request->password;
             $student->save();
+            $this->revokeCredentialsAfterReset($student, 'student', $request->studentId);
             Log::info("[Student Portal] Password change request", ['studentId'=>$request->studentId, 'password'=>$request->password]);
         } else if( $role === 'parent' ) {
             $parent = UserAuth::where('LoginIDParent', $request->studentId)->first(); // PEN ID
@@ -147,6 +149,7 @@ class AuthController extends Controller {
             $parent->HashPassword = Hash::make($request->password);
             $parent->PW2 = $request->password;
             $parent->save();
+            $this->revokeCredentialsAfterReset($parent, 'parent', $request->studentId);
             Log::info("[Parent Portal] Password change request", ['PEN ID'=>$request->studentId, 'password'=>$request->password]);
         } else {
             return $this->errorResponse('Invalid role');
@@ -190,6 +193,24 @@ class AuthController extends Controller {
         $isValid = $user && Hash::check($request->password, $user->getAuthPassword());
 
         return $this->successResponse('Success', ['authenticated' => $isValid]);
+    }
+
+    /**
+     * A reset driven from the portal is the compromise-response path: the person
+     * calling it is not necessarily the person holding the current session. So it
+     * cuts everything — biometric enrolments *and* live access tokens — where the
+     * user-initiated changePassword only cuts enrolments.
+     */
+    private function revokeCredentialsAfterReset($user, string $role, $identifier): void {
+        $devices = DeviceToken::revokeAllFor($user);
+        $sessions = $user->tokens()->delete();
+
+        Log::info('[Portal] Password reset revoked credentials', [
+            'role' => $role,
+            'identifier' => $identifier,
+            'deviceTokens' => $devices,
+            'sessions' => $sessions,
+        ]);
     }
 
     private function processParentLogin($user) {
@@ -312,6 +333,21 @@ class AuthController extends Controller {
             $user->save();
             Log::info('Change Password save', ['date'=>now(), 'studentId'=>$studentId, 'fortherecord' => $request->newPassword]);
         }
+
+        // Biometric enrolments do not survive a password change. A device token is
+        // exchanged for a session without the password ever being presented, so
+        // leaving it alive would mean the old password's enrolments still open the
+        // account. The user re-enables biometrics from Settings afterwards.
+        //
+        // Access tokens are deliberately left alone here: login already enforces one
+        // session per user, so the only live token is the caller's own, and revoking
+        // it would sign them out in the middle of changing their own password.
+        $revoked = DeviceToken::revokeAllFor($user);
+        Log::info('Change Password revoked device tokens', [
+            'role' => $role,
+            'studentId' => $studentId,
+            'revoked' => $revoked,
+        ]);
 
         // Send an email to notify the user for the changed password
 
