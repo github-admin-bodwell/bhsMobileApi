@@ -55,7 +55,12 @@ Route::get('/app-version', function () {
 Route::middleware('throttle:10,1')->post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('throttle:10,1')->post('/auth/sync-password', [AuthController::class, 'syncPassword']);
 Route::middleware('throttle:10,1')->post('/auth/portal-login', [AuthController::class, 'portalLogin']);
-Route::middleware('throttle:10,1')->post('/auth/device/issue',  [DeviceTokenController::class, 'issue']); // public: uses deviceToken hash
+// v1: permanently dormant, answers 410 unconditionally. Kept routed so the February
+// 2026 bundle gets a 410 rather than a 404, and so task A3 can keep counting it.
+// Do not re-arm — see DeviceTokenController::issue().
+Route::middleware('throttle:10,1')->post('/auth/device/issue',  [DeviceTokenController::class, 'issue']);
+// v2: the live biometric exchange, gated on features.biometric_login.
+Route::middleware('throttle:10,1')->post('/auth/device/v2/issue', [DeviceTokenController::class, 'issueV2']); // public: uses deviceToken hash + deviceId
 Route::middleware('throttle:10,1')->get('/auth/azure-redirect', [AzureAuthController::class, 'redirect']);
 
 Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
