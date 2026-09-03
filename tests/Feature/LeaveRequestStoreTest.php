@@ -29,11 +29,12 @@ class LeaveRequestStoreTest extends TestCase
         ];
     }
 
-    public function test_end_date_more_than_max_days_after_start_is_rejected(): void
+    public function test_end_on_a_later_day_is_rejected(): void
     {
-        config(['features.leave_max_days' => 5]);
+        config(['features.leave_max_hours' => 12]);
         $this->actingAsStudent();
 
+        // The original incident: a year-long leave from the iOS year wheel.
         $response = $this->postJson('/api/add-leave-request', $this->payload(
             '2026-09-01 17:39:00',
             '2027-09-01 17:39:00'
@@ -41,22 +42,50 @@ class LeaveRequestStoreTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('status', false)
-            ->assertJsonPath('data.code', 'leave_duration_exceeded')
-            ->assertJsonPath('data.maxDays', 5);
+            ->assertJsonPath('data.code', 'leave_not_same_day')
+            ->assertJsonPath('data.maxHours', 12);
     }
 
-    public function test_end_date_one_minute_past_the_limit_is_rejected(): void
+    public function test_crossing_midnight_is_rejected_even_when_short(): void
     {
-        config(['features.leave_max_days' => 5]);
+        config(['features.leave_max_hours' => 12]);
         $this->actingAsStudent();
 
         $response = $this->postJson('/api/add-leave-request', $this->payload(
-            '2026-09-01 17:39:00',
-            '2026-09-06 17:40:00'
+            '2026-09-02 23:00:00',
+            '2026-09-03 00:30:00'
         ));
 
         $response->assertStatus(422)
-            ->assertJsonPath('data.code', 'leave_duration_exceeded');
+            ->assertJsonPath('data.code', 'leave_not_same_day');
+    }
+
+    public function test_same_day_but_over_max_hours_is_rejected(): void
+    {
+        config(['features.leave_max_hours' => 12]);
+        $this->actingAsStudent();
+
+        $response = $this->postJson('/api/add-leave-request', $this->payload(
+            '2026-09-02 08:00:00',
+            '2026-09-02 20:01:00'
+        ));
+
+        $response->assertStatus(422)
+            ->assertJsonPath('data.code', 'leave_duration_exceeded')
+            ->assertJsonPath('data.maxHours', 12);
+    }
+
+    public function test_zero_length_request_is_rejected(): void
+    {
+        $this->actingAsStudent();
+
+        $response = $this->postJson('/api/add-leave-request', $this->payload(
+            '2026-09-02 16:01:00',
+            '2026-09-02 16:01:00'
+        ));
+
+        $response->assertStatus(422)
+            ->assertJsonPath('data.code', 'leave_end_before_start');
     }
 
     public function test_end_before_start_is_rejected_with_a_code(): void
