@@ -21,18 +21,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Leave request maximum duration (days)
+    | Leave request maximum duration (hours, same day)
     |--------------------------------------------------------------------------
     |
-    | POST /add-leave-request rejects an end date more than this many days
-    | after the start date with 422 and code "leave_duration_exceeded". Added
-    | after a student submitted a one-year campus leave by flicking the year
-    | wheel on the iOS picker; once approved, it blocked every later request
-    | through the overlap check. The mobile client enforces the same limit on
-    | its date pickers, so keep the two in step.
+    | Residence rule as of 2026-09-03: a campus leave request from the app
+    | starts and ends on the same day and lasts at most this many hours.
+    | Anything longer goes through a separate process outside the app.
+    |
+    | POST /add-leave-request answers 422 with code "leave_not_same_day" or
+    | "leave_duration_exceeded" (plus maxHours). The first version of this
+    | guard was a 5-day cap, added after a student submitted a one-year leave
+    | by flicking the year wheel on the iOS picker; once approved it blocked
+    | every later request through the overlap check. The mobile client
+    | enforces the same rule, so keep the two in step.
     |
     */
 
-    'leave_max_days' => (int) env('LEAVE_MAX_DAYS', 5),
+    'leave_max_hours' => (int) env('LEAVE_MAX_HOURS', 12),
 
 ];

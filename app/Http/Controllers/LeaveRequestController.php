@@ -161,17 +161,23 @@ class LeaveRequestController extends Controller
         $startAt = Carbon::parse($data['startDate']);
         $endAt = Carbon::parse($data['endDate']);
 
-        if ($endAt->lt($startAt)) {
-            return $this->errorResponse('endDate must be on or after startDate', [
+        if ($endAt->lte($startAt)) {
+            return $this->errorResponse('endDate must be after startDate', [
                 'code' => 'leave_end_before_start',
             ], null, 422);
         }
 
-        $maxDays = max(1, (int) config('features.leave_max_days', 5));
-        if ($endAt->gt($startAt->copy()->addDays($maxDays))) {
-            return $this->errorResponse("A leave request can cover at most {$maxDays} days", [
+        $maxHours = max(1, (int) config('features.leave_max_hours', 12));
+        if (!$endAt->isSameDay($startAt)) {
+            return $this->errorResponse('A leave request must start and end on the same day', [
+                'code' => 'leave_not_same_day',
+                'maxHours' => $maxHours,
+            ], null, 422);
+        }
+        if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
+            return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
                 'code' => 'leave_duration_exceeded',
-                'maxDays' => $maxDays,
+                'maxHours' => $maxHours,
             ], null, 422);
         }
 
