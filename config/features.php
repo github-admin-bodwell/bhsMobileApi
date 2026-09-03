@@ -19,4 +19,20 @@ return [
 
     'biometric_login' => (bool) env('BIOMETRIC_LOGIN_ENABLED', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Leave request maximum duration (days)
+    |--------------------------------------------------------------------------
+    |
+    | POST /add-leave-request rejects an end date more than this many days
+    | after the start date with 422 and code "leave_duration_exceeded". Added
+    | after a student submitted a one-year campus leave by flicking the year
+    | wheel on the iOS picker; once approved, it blocked every later request
+    | through the overlap check. The mobile client enforces the same limit on
+    | its date pickers, so keep the two in step.
+    |
+    */
+
+    'leave_max_days' => (int) env('LEAVE_MAX_DAYS', 5),
+
 ];
