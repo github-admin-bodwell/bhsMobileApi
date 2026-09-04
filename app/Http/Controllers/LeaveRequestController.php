@@ -161,8 +161,24 @@ class LeaveRequestController extends Controller
         $startAt = Carbon::parse($data['startDate']);
         $endAt = Carbon::parse($data['endDate']);
 
-        if ($endAt->lt($startAt)) {
-            return $this->errorResponse('endDate must be on or after startDate', [], null, 422);
+        if ($endAt->lte($startAt)) {
+            return $this->errorResponse('endDate must be after startDate', [
+                'code' => 'leave_end_before_start',
+            ], null, 422);
+        }
+
+        $maxHours = max(1, (int) config('features.leave_max_hours', 12));
+        if (!$endAt->isSameDay($startAt)) {
+            return $this->errorResponse('A leave request must start and end on the same day', [
+                'code' => 'leave_not_same_day',
+                'maxHours' => $maxHours,
+            ], null, 422);
+        }
+        if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
+            return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
+                'code' => 'leave_duration_exceeded',
+                'maxHours' => $maxHours,
+            ], null, 422);
         }
 
         $startDateTime = $startAt->toDateTimeString();
@@ -178,7 +194,17 @@ class LeaveRequestController extends Controller
 
         $conflicts = $this->getLeaveRequestConflicts($studentId, $startDateTime, $endDateTime);
         if (!empty($conflicts)) {
+            // 4xx responses are not logged by the framework; without this line a
+            // student who is stuck behind an old request is invisible in the log.
+            Log::warning('Leave request rejected: overlaps an existing request', [
+                'studentId' => $studentId,
+                'startDate' => $startDateTime,
+                'endDate' => $endDateTime,
+                'conflicts' => array_column($conflicts, 'LeaveID'),
+            ]);
+
             return $this->errorResponse('Leave request conflicts with an existing request', [
+                'code' => 'leave_conflict',
                 'conflicts' => $conflicts,
             ], null, 409);
         }
