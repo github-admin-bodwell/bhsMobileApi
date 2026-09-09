@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Parents;
 use App\Models\LeaveRequest;
+use App\Services\LeaveRequestEditor;
 use App\Services\LeaveRuleResolver;
 use App\Models\StudentLeaveBan;
 use App\Traits\HttpResponse;
@@ -55,6 +56,7 @@ class LeaveRequestController extends Controller
                 CONVERT(varchar, NULLIF(L.OutDate, '1900-01-01'), 120) AS OutDateISO,
                 CONVERT(varchar, NULLIF(L.InDate, '1900-01-01'), 120) AS InDateISO,
                 DATEDIFF(minute, NULLIF(L.OutDate, '1900-01-01'), NULLIF(L.InDate, '1900-01-01')) AS OutDurationMinutes,
+                CASE WHEN L.LeaveStatus = 'P' AND (L.OutDate IS NULL OR L.OutDate < '1901-01-01') THEN 1 ELSE 0 END AS CanEdit,
                 CONVERT(varchar, L.SDate, 100) AS SDate,
                 CONVERT(varchar, L.EDate, 100) AS EDate,
                 CONCAT(S.FirstName, ' ', S.LastName) AS StaffFullName
@@ -162,23 +164,8 @@ class LeaveRequestController extends Controller
         $startAt = Carbon::parse($data['startDate']);
         $endAt = Carbon::parse($data['endDate']);
 
-        if ($endAt->lte($startAt)) {
-            return $this->errorResponse('endDate must be after startDate', [
-                'code' => 'leave_end_before_start',
-            ], null, 422);
-        }
-
-        $rule = $this->leaveRule($studentId);
-        $maxHours = $rule['maxHours'];
-        if (!$endAt->isSameDay($startAt)) {
-            return $this->errorResponse('A leave request must start and end on the same day', [
-                'code' => 'leave_not_same_day',
-            ] + $rule, null, 422);
-        }
-        if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
-            return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
-                'code' => 'leave_duration_exceeded',
-            ] + $rule, null, 422);
+        if ($rejection = $this->windowRejection($studentId, $startAt, $endAt)) {
+            return $rejection;
         }
 
         $startDateTime = $startAt->toDateTimeString();
@@ -228,6 +215,174 @@ class LeaveRequestController extends Controller
             'result' => 1,
             'leaveRequestId' => $leaveRequest->LeaveID ?? null,
         ], 201);
+    }
+
+    /**
+     * The same-day / hour-limit checks shared by create and update. Null when
+     * the window is acceptable, otherwise the 422 to send back.
+     */
+    private function windowRejection(string $studentId, Carbon $startAt, Carbon $endAt)
+    {
+        if ($endAt->lte($startAt)) {
+            return $this->errorResponse('endDate must be after startDate', [
+                'code' => 'leave_end_before_start',
+            ], null, 422);
+        }
+
+        $rule = $this->leaveRule($studentId);
+        $maxHours = $rule['maxHours'];
+        if (!$endAt->isSameDay($startAt)) {
+            return $this->errorResponse('A leave request must start and end on the same day', [
+                'code' => 'leave_not_same_day',
+            ] + $rule, null, 422);
+        }
+        if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
+            return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
+                'code' => 'leave_duration_exceeded',
+            ] + $rule, null, 422);
+        }
+
+        return null;
+    }
+
+    /**
+     * POST /update-leave-request — a student changes the window or text of
+     * their own request while it is still pending and not signed out.
+     */
+    public function update(Request $request)
+    {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        $data = $request->validate([
+            'leaveId' => ['required', 'integer'],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date'],
+            'comment' => ['nullable', 'string'],
+            'doing' => ['nullable', 'string'],
+        ]);
+        $leaveId = (int) $data['leaveId'];
+
+        $editor = app(LeaveRequestEditor::class);
+        $row = $editor->findEditable($studentId, $leaveId);
+        if (!$row) {
+            return $this->notEditable($studentId, $leaveId, 'update');
+        }
+
+        $startAt = Carbon::parse($data['startDate']);
+        $endAt = Carbon::parse($data['endDate']);
+        if ($rejection = $this->windowRejection($studentId, $startAt, $endAt)) {
+            return $rejection;
+        }
+
+        $startDateTime = $startAt->toDateTimeString();
+        $endDateTime = $endAt->toDateTimeString();
+
+        $leaveBan = $this->getStudentLeaveBan($studentId, $startAt->toDateString(), $endAt->toDateString());
+        if (!empty($leaveBan)) {
+            return $this->successResponse('Leave request blocked', [
+                'result' => 2,
+                'leaveBans' => $leaveBan,
+            ]);
+        }
+
+        $conflicts = $this->conflictQuery($studentId, $startDateTime, $endDateTime)
+            ->where('LeaveID', '<>', $leaveId)
+            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
+            ->toArray();
+        if (!empty($conflicts)) {
+            Log::warning('Leave request update rejected: overlaps a pending or in-progress request', [
+                'studentId' => $studentId,
+                'leaveId' => $leaveId,
+                'startDate' => $startDateTime,
+                'endDate' => $endDateTime,
+                'conflicts' => array_column($conflicts, 'LeaveID'),
+            ]);
+
+            return $this->errorResponse('Leave request overlaps a pass that is not finished yet', [
+                'code' => 'leave_conflict',
+                'conflicts' => $conflicts,
+            ], null, 409);
+        }
+
+        $changed = $editor->update($studentId, $leaveId, [
+            'SDate' => $startDateTime,
+            'EDate' => $endDateTime,
+            'ToDo' => $data['doing'] ?? '',
+            'Comment' => $data['comment'] ?? '',
+        ]);
+        if ($changed === 0) {
+            return $this->notEditable($studentId, $leaveId, 'update');
+        }
+
+        Log::info('Leave request updated by student', [
+            'studentId' => $studentId,
+            'leaveId' => $leaveId,
+            'from' => [$row->SDate, $row->EDate],
+            'to' => [$startDateTime, $endDateTime],
+        ]);
+
+        return $this->successResponse('Leave request updated', [
+            'result' => 1,
+            'leaveRequestId' => $leaveId,
+        ]);
+    }
+
+    /**
+     * POST /cancel-leave-request — a student withdraws their own request
+     * while it is still pending and not signed out. The row is deleted;
+     * the window is logged so there is a trace.
+     */
+    public function cancel(Request $request)
+    {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        $data = $request->validate([
+            'leaveId' => ['required', 'integer'],
+        ]);
+        $leaveId = (int) $data['leaveId'];
+
+        $editor = app(LeaveRequestEditor::class);
+        $row = $editor->findEditable($studentId, $leaveId);
+        if (!$row) {
+            return $this->notEditable($studentId, $leaveId, 'cancel');
+        }
+
+        if ($editor->delete($studentId, $leaveId) === 0) {
+            return $this->notEditable($studentId, $leaveId, 'cancel');
+        }
+
+        Log::info('Leave request cancelled by student', [
+            'studentId' => $studentId,
+            'leaveId' => $leaveId,
+            'window' => [$row->SDate, $row->EDate],
+            'toDo' => $row->ToDo,
+        ]);
+
+        return $this->successResponse('Leave request cancelled', [
+            'result' => 1,
+            'leaveRequestId' => $leaveId,
+        ]);
+    }
+
+    private function notEditable(string $studentId, int $leaveId, string $action)
+    {
+        // 4xx responses are not logged by the framework.
+        Log::info("Leave request {$action} refused: not pending or already signed out", [
+            'studentId' => $studentId,
+            'leaveId' => $leaveId,
+        ]);
+
+        return $this->errorResponse('This leave request can no longer be changed', [
+            'code' => 'leave_not_editable',
+        ], null, 409);
     }
 
     /**

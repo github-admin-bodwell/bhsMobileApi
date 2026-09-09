@@ -113,6 +113,8 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
     Route::get('get-leave-ban', [LeaveRequestController::class, 'currentBan']);
     Route::get('get-leave-rule', [LeaveRequestController::class, 'rule']);
     Route::post('add-leave-request', [LeaveRequestController::class, 'store']);
+    Route::post('update-leave-request', [LeaveRequestController::class, 'update']);
+    Route::post('cancel-leave-request', [LeaveRequestController::class, 'cancel']);
 
     // BYOD
     Route::get('get-byod-voucher', [ByodController::class, 'voucher']);

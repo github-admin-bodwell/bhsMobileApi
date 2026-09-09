@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\LeaveRequestController;
 use App\Models\StudentAuth;
+use App\Services\LeaveRequestEditor;
 use App\Services\LeaveRuleResolver;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -191,6 +192,98 @@ class LeaveRequestStoreTest extends TestCase
         $this->assertMatchesRegularExpression('/.LeaveStatus. = \? and \(.InDate. is null or .InDate. < \?\)/', $sql);
         $this->assertContains('A', $bindings);
         $this->assertContains('1901-01-01', $bindings);
+    }
+
+    private function pendingRow(int $leaveId = 5001): object
+    {
+        return (object) [
+            'LeaveID' => $leaveId,
+            'StudentID' => '202600081',
+            'LeaveStatus' => 'P',
+            'SDate' => '2026-09-10 15:00:00',
+            'EDate' => '2026-09-10 18:00:00',
+            'ToDo' => 'Shopping',
+            'Comment' => '',
+        ];
+    }
+
+    public function test_update_is_refused_when_the_request_is_not_pending_any_more(): void
+    {
+        $this->actingAsStudent();
+        $this->partialMock(LeaveRequestEditor::class, function ($mock) {
+            $mock->shouldReceive('findEditable')->with('202600081', 5001)->andReturn(null);
+            $mock->shouldNotReceive('update');
+        });
+
+        $this->postJson('/api/update-leave-request', [
+            'leaveId' => 5001,
+            'startDate' => '2026-09-10 16:00:00',
+            'endDate' => '2026-09-10 17:00:00',
+            'doing' => 'Shopping',
+        ])->assertStatus(409)
+            ->assertJsonPath('data.code', 'leave_not_editable');
+    }
+
+    public function test_update_applies_the_same_window_rules_as_create(): void
+    {
+        $this->actingAsStudent('Unity East (Jr.)');
+        $this->partialMock(LeaveRequestEditor::class, function ($mock) {
+            $mock->shouldReceive('findEditable')->andReturn($this->pendingRow());
+            $mock->shouldNotReceive('update');
+        });
+
+        $this->postJson('/api/update-leave-request', [
+            'leaveId' => 5001,
+            'startDate' => '2026-09-10 08:00:00',
+            'endDate' => '2026-09-10 14:01:00',
+            'doing' => 'Shopping',
+        ])->assertStatus(422)
+            ->assertJsonPath('data.code', 'leave_duration_exceeded')
+            ->assertJsonPath('data.maxHours', 6);
+
+        $this->postJson('/api/update-leave-request', [
+            'leaveId' => 5001,
+            'startDate' => '2026-09-10 23:00:00',
+            'endDate' => '2026-09-11 00:30:00',
+            'doing' => 'Shopping',
+        ])->assertStatus(422)
+            ->assertJsonPath('data.code', 'leave_not_same_day');
+    }
+
+    public function test_cancel_deletes_a_pending_request(): void
+    {
+        $this->actingAsStudent();
+        $this->partialMock(LeaveRequestEditor::class, function ($mock) {
+            $mock->shouldReceive('findEditable')->with('202600081', 5001)->andReturn($this->pendingRow());
+            $mock->shouldReceive('delete')->with('202600081', 5001)->once()->andReturn(1);
+        });
+
+        $this->postJson('/api/cancel-leave-request', ['leaveId' => 5001])
+            ->assertOk()
+            ->assertJsonPath('data.result', 1)
+            ->assertJsonPath('data.leaveRequestId', 5001);
+    }
+
+    public function test_cancel_is_refused_when_staff_signed_the_student_out_first(): void
+    {
+        $this->actingAsStudent();
+        $this->partialMock(LeaveRequestEditor::class, function ($mock) {
+            // Editable when read, but the conditional DELETE finds nothing:
+            // atrium recorded the sign-out in between.
+            $mock->shouldReceive('findEditable')->andReturn($this->pendingRow());
+            $mock->shouldReceive('delete')->once()->andReturn(0);
+        });
+
+        $this->postJson('/api/cancel-leave-request', ['leaveId' => 5001])
+            ->assertStatus(409)
+            ->assertJsonPath('data.code', 'leave_not_editable');
+    }
+
+    public function test_cancel_needs_a_leave_id(): void
+    {
+        $this->actingAsStudent();
+
+        $this->postJson('/api/cancel-leave-request', [])->assertStatus(422);
     }
 
     public function test_unauthenticated_request_is_rejected(): void
