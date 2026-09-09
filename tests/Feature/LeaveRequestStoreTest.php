@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\LeaveRequestController;
 use App\Models\StudentAuth;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -99,6 +100,29 @@ class LeaveRequestStoreTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('data.code', 'leave_end_before_start');
+    }
+
+    /**
+     * 2026-09-09 report: a student who came back early from a 3:00-6:00 pass
+     * could not submit 4:00-5:00, because the finished pass (status A, signed
+     * back in) still counted as a conflict. Only P (not yet out) and I (out
+     * now) may block; A and R must be ignored.
+     */
+    public function test_conflict_check_only_looks_at_pending_and_out_passes(): void
+    {
+        $query = app(LeaveRequestController::class)
+            ->conflictQuery('202600081', '2026-09-09 16:00:00', '2026-09-09 17:00:00');
+
+        $sql = $query->toSql();
+        $bindings = $query->getBindings();
+
+        $this->assertMatchesRegularExpression('/.LeaveStatus. in \(\?, \?\)/', $sql);
+        $this->assertStringNotContainsString('<>', $sql);
+        $this->assertSame(['P', 'I'], LeaveRequestController::BLOCKING_LEAVE_STATUSES);
+        $this->assertContains('P', $bindings);
+        $this->assertContains('I', $bindings);
+        $this->assertNotContains('A', $bindings);
+        $this->assertNotContains('R', $bindings);
     }
 
     public function test_unauthenticated_request_is_rejected(): void
