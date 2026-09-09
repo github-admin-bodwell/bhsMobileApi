@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Parents;
 use App\Models\LeaveRequest;
+use App\Services\LeaveRuleResolver;
 use App\Models\StudentLeaveBan;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
@@ -167,18 +168,17 @@ class LeaveRequestController extends Controller
             ], null, 422);
         }
 
-        $maxHours = max(1, (int) config('features.leave_max_hours', 12));
+        $rule = $this->leaveRule($studentId);
+        $maxHours = $rule['maxHours'];
         if (!$endAt->isSameDay($startAt)) {
             return $this->errorResponse('A leave request must start and end on the same day', [
                 'code' => 'leave_not_same_day',
-                'maxHours' => $maxHours,
-            ], null, 422);
+            ] + $rule, null, 422);
         }
         if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
             return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
                 'code' => 'leave_duration_exceeded',
-                'maxHours' => $maxHours,
-            ], null, 422);
+            ] + $rule, null, 422);
         }
 
         $startDateTime = $startAt->toDateTimeString();
@@ -228,6 +228,28 @@ class LeaveRequestController extends Controller
             'result' => 1,
             'leaveRequestId' => $leaveRequest->LeaveID ?? null,
         ], 201);
+    }
+
+    /**
+     * GET /get-leave-rule — the same-day hour limit that applies to the
+     * signed-in student, so the app can check locally with the right number.
+     */
+    public function rule(Request $request)
+    {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        return $this->successResponse('Success', $this->leaveRule($studentId));
+    }
+
+    private function leaveRule(string $studentId): array
+    {
+        // Resolved from the container at call time so tests can stand in the
+        // hall lookup without a SQL Server.
+        return app(LeaveRuleResolver::class)->ruleFor($studentId);
     }
 
     private function getStudentLeaveBan(string $studentId, string $startDate, string $endDate): array
