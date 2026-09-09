@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\LeaveRequestController;
 use App\Models\StudentAuth;
 use App\Services\LeaveRuleResolver;
 use Laravel\Sanctum\Sanctum;
@@ -161,6 +162,35 @@ class LeaveRequestStoreTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('data.code', 'leave_end_before_start');
+    }
+
+    /**
+     * 2026-09-09 report: a student who came back early from a 3:00-6:00 pass
+     * could not submit 4:00-5:00, because the finished pass (status A, signed
+     * back in) still counted as a conflict. P (not yet out), I (out now) and
+     * an A with no sign-in recorded may block; a finished A and R must not.
+     */
+    public function test_conflict_check_only_looks_at_pending_and_out_passes(): void
+    {
+        $query = app(LeaveRequestController::class)
+            ->conflictQuery('202600081', '2026-09-09 16:00:00', '2026-09-09 17:00:00');
+
+        $sql = $query->toSql();
+        $bindings = $query->getBindings();
+
+        $this->assertMatchesRegularExpression('/.LeaveStatus. in \(\?, \?\)/', $sql);
+        $this->assertStringNotContainsString('<>', $sql);
+        $this->assertSame(['P', 'I'], LeaveRequestController::BLOCKING_LEAVE_STATUSES);
+        $this->assertContains('P', $bindings);
+        $this->assertContains('I', $bindings);
+        $this->assertNotContains('R', $bindings);
+
+        // A still blocks while the desktop has not recorded a sign-in: SPAdmin
+        // stores an empty date as 1900-01-01, so "no sign-in" is null or earlier
+        // than 1901.
+        $this->assertMatchesRegularExpression('/.LeaveStatus. = \? and \(.InDate. is null or .InDate. < \?\)/', $sql);
+        $this->assertContains('A', $bindings);
+        $this->assertContains('1901-01-01', $bindings);
     }
 
     public function test_unauthenticated_request_is_rejected(): void
