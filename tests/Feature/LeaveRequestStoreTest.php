@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\StudentAuth;
+use App\Services\LeaveRuleResolver;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -12,11 +13,16 @@ use Tests\TestCase;
  */
 class LeaveRequestStoreTest extends TestCase
 {
-    private function actingAsStudent(): void
+    private function actingAsStudent(?string $hall = 'Legacy West'): void
     {
         $student = new StudentAuth();
         $student->UserID = '202600081';
         Sanctum::actingAs($student);
+
+        // The hall comes from tblBHSHomestay; stand it in so no SQL Server is needed.
+        $this->partialMock(LeaveRuleResolver::class, function ($mock) use ($hall) {
+            $mock->shouldReceive('hallFor')->andReturn($hall);
+        });
     }
 
     private function payload(string $start, string $end): array
@@ -31,7 +37,6 @@ class LeaveRequestStoreTest extends TestCase
 
     public function test_end_on_a_later_day_is_rejected(): void
     {
-        config(['features.leave_max_hours' => 12]);
         $this->actingAsStudent();
 
         // The original incident: a year-long leave from the iOS year wheel.
@@ -43,12 +48,12 @@ class LeaveRequestStoreTest extends TestCase
         $response->assertStatus(422)
             ->assertJsonPath('status', false)
             ->assertJsonPath('data.code', 'leave_not_same_day')
-            ->assertJsonPath('data.maxHours', 12);
+            ->assertJsonPath('data.maxHours', 8)
+            ->assertJsonPath('data.tier', 'senior');
     }
 
     public function test_crossing_midnight_is_rejected_even_when_short(): void
     {
-        config(['features.leave_max_hours' => 12]);
         $this->actingAsStudent();
 
         $response = $this->postJson('/api/add-leave-request', $this->payload(
@@ -60,19 +65,76 @@ class LeaveRequestStoreTest extends TestCase
             ->assertJsonPath('data.code', 'leave_not_same_day');
     }
 
-    public function test_same_day_but_over_max_hours_is_rejected(): void
+    public function test_senior_over_eight_hours_is_rejected(): void
     {
-        config(['features.leave_max_hours' => 12]);
-        $this->actingAsStudent();
+        $this->actingAsStudent('Legacy West');
 
         $response = $this->postJson('/api/add-leave-request', $this->payload(
             '2026-09-02 08:00:00',
-            '2026-09-02 20:01:00'
+            '2026-09-02 16:01:00'
         ));
 
         $response->assertStatus(422)
             ->assertJsonPath('data.code', 'leave_duration_exceeded')
-            ->assertJsonPath('data.maxHours', 12);
+            ->assertJsonPath('data.maxHours', 8)
+            ->assertJsonPath('data.tier', 'senior')
+            ->assertJsonPath('data.juniorHours', 6)
+            ->assertJsonPath('data.seniorHours', 8);
+    }
+
+    public function test_junior_hall_over_six_hours_is_rejected(): void
+    {
+        $this->actingAsStudent('Unity East (Jr.)');
+
+        $response = $this->postJson('/api/add-leave-request', $this->payload(
+            '2026-09-02 08:00:00',
+            '2026-09-02 14:01:00'
+        ));
+
+        $response->assertStatus(422)
+            ->assertJsonPath('data.code', 'leave_duration_exceeded')
+            ->assertJsonPath('data.maxHours', 6)
+            ->assertJsonPath('data.tier', 'junior')
+            ->assertJsonPath('data.hall', 'Unity East (Jr.)');
+    }
+
+    public function test_student_with_no_hall_gets_the_junior_limit(): void
+    {
+        $this->actingAsStudent(null);
+
+        $response = $this->postJson('/api/add-leave-request', $this->payload(
+            '2026-09-02 08:00:00',
+            '2026-09-02 14:01:00'
+        ));
+
+        $response->assertStatus(422)
+            ->assertJsonPath('data.code', 'leave_duration_exceeded')
+            ->assertJsonPath('data.maxHours', 6)
+            ->assertJsonPath('data.tier', 'junior');
+    }
+
+    public function test_tier_comes_from_the_hall_marker(): void
+    {
+        $this->assertSame('junior', LeaveRuleResolver::tierForHall('Courage West (Jr.)'));
+        $this->assertSame('junior', LeaveRuleResolver::tierForHall('Harmony East (Jr.)'));
+        $this->assertSame('junior', LeaveRuleResolver::tierForHall('Unity East (Jr.)'));
+        $this->assertSame('senior', LeaveRuleResolver::tierForHall('Courage West (Sr.)'));
+        $this->assertSame('senior', LeaveRuleResolver::tierForHall('Legacy West'));
+        $this->assertSame('senior', LeaveRuleResolver::tierForHall('Discovery East'));
+        $this->assertSame('junior', LeaveRuleResolver::tierForHall(null));
+        $this->assertSame('junior', LeaveRuleResolver::tierForHall('   '));
+    }
+
+    public function test_leave_rule_endpoint_reports_the_student_limit(): void
+    {
+        $this->actingAsStudent('Harmony East (Jr.)');
+
+        $this->getJson('/api/get-leave-rule')
+            ->assertOk()
+            ->assertJsonPath('data.maxHours', 6)
+            ->assertJsonPath('data.tier', 'junior')
+            ->assertJsonPath('data.juniorHours', 6)
+            ->assertJsonPath('data.seniorHours', 8);
     }
 
     public function test_zero_length_request_is_rejected(): void
