@@ -49,11 +49,11 @@ class LeaveRequestController extends Controller
                 L.ApprovalStaff,
                 CONVERT(varchar, L.SDate, 120) AS StartDate,
                 CONVERT(varchar, L.EDate, 120) AS EndDate,
-                CONVERT(varchar, L.OutDate, 100) AS OutDate,
-                CONVERT(varchar, L.InDate, 100) AS InDate,
-                CONVERT(varchar, L.OutDate, 120) AS OutDateISO,
-                CONVERT(varchar, L.InDate, 120) AS InDateISO,
-                DATEDIFF(minute, L.OutDate, L.InDate) AS OutDurationMinutes,
+                CONVERT(varchar, NULLIF(L.OutDate, '1900-01-01'), 100) AS OutDate,
+                CONVERT(varchar, NULLIF(L.InDate, '1900-01-01'), 100) AS InDate,
+                CONVERT(varchar, NULLIF(L.OutDate, '1900-01-01'), 120) AS OutDateISO,
+                CONVERT(varchar, NULLIF(L.InDate, '1900-01-01'), 120) AS InDateISO,
+                DATEDIFF(minute, NULLIF(L.OutDate, '1900-01-01'), NULLIF(L.InDate, '1900-01-01')) AS OutDurationMinutes,
                 CONVERT(varchar, L.SDate, 100) AS SDate,
                 CONVERT(varchar, L.EDate, 100) AS EDate,
                 CONCAT(S.FirstName, ' ', S.LastName) AS StaffFullName
@@ -196,14 +196,14 @@ class LeaveRequestController extends Controller
         if (!empty($conflicts)) {
             // 4xx responses are not logged by the framework; without this line a
             // student who is stuck behind an old request is invisible in the log.
-            Log::warning('Leave request rejected: overlaps an existing request', [
+            Log::warning('Leave request rejected: overlaps a pending or in-progress request', [
                 'studentId' => $studentId,
                 'startDate' => $startDateTime,
                 'endDate' => $endDateTime,
                 'conflicts' => array_column($conflicts, 'LeaveID'),
             ]);
 
-            return $this->errorResponse('Leave request conflicts with an existing request', [
+            return $this->errorResponse('Leave request overlaps a pass that is not finished yet', [
                 'code' => 'leave_conflict',
                 'conflicts' => $conflicts,
             ], null, 409);
@@ -247,11 +247,40 @@ class LeaveRequestController extends Controller
             ->toArray();
     }
 
+    /**
+     * Statuses that still block a new request for an overlapping window.
+     *
+     * SPAdmin (boarding/?page=leave) saves a record as I once OutDate is set and
+     * as A once InDate is set too, so A normally means the student has signed
+     * back in and the pass is finished. Staff can also pick "Approved" in the
+     * modal before the student leaves; that row has no sign-in yet and must
+     * still block. R is rejected. An empty date is stored as 1900-01-01.
+     */
+    public const BLOCKING_LEAVE_STATUSES = ['P', 'I'];
+    public const NO_DATE_PLACEHOLDER = '1901-01-01';
+
     private function getLeaveRequestConflicts(string $studentId, string $startDateTime, string $endDateTime): array
+    {
+        return $this->conflictQuery($studentId, $startDateTime, $endDateTime)
+            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
+            ->toArray();
+    }
+
+    public function conflictQuery(string $studentId, string $startDateTime, string $endDateTime)
     {
         return LeaveRequest::query()
             ->where('StudentID', $studentId)
-            ->where('LeaveStatus', '<>', 'R')
+            ->where(function ($query) {
+                $query->whereIn('LeaveStatus', self::BLOCKING_LEAVE_STATUSES)
+                    ->orWhere(function ($query) {
+                        // Approved on the desktop but not signed back in.
+                        $query->where('LeaveStatus', 'A')
+                            ->where(function ($query) {
+                                $query->whereNull('InDate')
+                                    ->orWhere('InDate', '<', self::NO_DATE_PLACEHOLDER);
+                            });
+                    });
+            })
             ->where(function ($query) use ($startDateTime, $endDateTime) {
                 $query->whereBetween('SDate', [$startDateTime, $endDateTime])
                     ->orWhereBetween('EDate', [$startDateTime, $endDateTime])
@@ -259,8 +288,6 @@ class LeaveRequestController extends Controller
                         $query->where('SDate', '<=', $startDateTime)
                             ->where('EDate', '>=', $endDateTime);
                     });
-            })
-            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
-            ->toArray();
+            });
     }
 }
