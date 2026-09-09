@@ -250,12 +250,14 @@ class LeaveRequestController extends Controller
     /**
      * Statuses that still block a new request for an overlapping window.
      *
-     * A leave record moves P (submitted) -> I (signed out at atrium, off campus)
-     * -> A (signed back in). A is a finished pass: a student who came back
-     * early and wants to go out again must not be refused because the earlier
-     * pass was booked until later. R is rejected. Only P and I are live.
+     * SPAdmin (boarding/?page=leave) saves a record as I once OutDate is set and
+     * as A once InDate is set too, so A normally means the student has signed
+     * back in and the pass is finished. Staff can also pick "Approved" in the
+     * modal before the student leaves; that row has no sign-in yet and must
+     * still block. R is rejected. An empty date is stored as 1900-01-01.
      */
     public const BLOCKING_LEAVE_STATUSES = ['P', 'I'];
+    public const NO_DATE_PLACEHOLDER = '1901-01-01';
 
     private function getLeaveRequestConflicts(string $studentId, string $startDateTime, string $endDateTime): array
     {
@@ -268,7 +270,17 @@ class LeaveRequestController extends Controller
     {
         return LeaveRequest::query()
             ->where('StudentID', $studentId)
-            ->whereIn('LeaveStatus', self::BLOCKING_LEAVE_STATUSES)
+            ->where(function ($query) {
+                $query->whereIn('LeaveStatus', self::BLOCKING_LEAVE_STATUSES)
+                    ->orWhere(function ($query) {
+                        // Approved on the desktop but not signed back in.
+                        $query->where('LeaveStatus', 'A')
+                            ->where(function ($query) {
+                                $query->whereNull('InDate')
+                                    ->orWhere('InDate', '<', self::NO_DATE_PLACEHOLDER);
+                            });
+                    });
+            })
             ->where(function ($query) use ($startDateTime, $endDateTime) {
                 $query->whereBetween('SDate', [$startDateTime, $endDateTime])
                     ->orWhereBetween('EDate', [$startDateTime, $endDateTime])

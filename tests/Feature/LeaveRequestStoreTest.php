@@ -105,8 +105,8 @@ class LeaveRequestStoreTest extends TestCase
     /**
      * 2026-09-09 report: a student who came back early from a 3:00-6:00 pass
      * could not submit 4:00-5:00, because the finished pass (status A, signed
-     * back in) still counted as a conflict. Only P (not yet out) and I (out
-     * now) may block; A and R must be ignored.
+     * back in) still counted as a conflict. P (not yet out), I (out now) and
+     * an A with no sign-in recorded may block; a finished A and R must not.
      */
     public function test_conflict_check_only_looks_at_pending_and_out_passes(): void
     {
@@ -121,8 +121,14 @@ class LeaveRequestStoreTest extends TestCase
         $this->assertSame(['P', 'I'], LeaveRequestController::BLOCKING_LEAVE_STATUSES);
         $this->assertContains('P', $bindings);
         $this->assertContains('I', $bindings);
-        $this->assertNotContains('A', $bindings);
         $this->assertNotContains('R', $bindings);
+
+        // A still blocks while the desktop has not recorded a sign-in: SPAdmin
+        // stores an empty date as 1900-01-01, so "no sign-in" is null or earlier
+        // than 1901.
+        $this->assertMatchesRegularExpression('/.LeaveStatus. = \? and \(.InDate. is null or .InDate. < \?\)/', $sql);
+        $this->assertContains('A', $bindings);
+        $this->assertContains('1901-01-01', $bindings);
     }
 
     public function test_unauthenticated_request_is_rejected(): void
