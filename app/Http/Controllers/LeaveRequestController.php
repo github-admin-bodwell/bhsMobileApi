@@ -112,6 +112,15 @@ class LeaveRequestController extends Controller
         return $this->successResponse('Success', $payload);
     }
 
+    /**
+     * GET /get-leave-ban — the ban in force for the student at this moment,
+     * for the card and the disabled Create button on the leave list screen.
+     *
+     * "This moment" is campus wall-clock time. The app runs on UTC, and
+     * Vancouver is 7 or 8 hours behind it, so a UTC date turned every ban on
+     * at 4 or 5pm the day before and off at 4 or 5pm on the day itself
+     * (reported 2026-09-28: "a message on Thursday for a Friday ban").
+     */
     public function currentBan(Request $request)
     {
         $user = $request->user();
@@ -121,26 +130,30 @@ class LeaveRequestController extends Controller
             return $this->errorResponse('Missing studentId', [], null, 422);
         }
 
-        $today = Carbon::now()->toDateString();
-
-        $sql = "
-            SELECT TOP 1
-                Comment,
-                CONVERT(varchar, FromDate, 100) AS FromDate,
-                CONVERT(varchar, ToDate, 100) AS ToDate
-            FROM tblBHSStudentLeaveBan
-            WHERE StudentID = :studentId
-              AND Status = 'A'
-              AND :today BETWEEN FromDate AND ToDate
-            ORDER BY FromDate DESC";
-
-        $rows = DB::select($sql, ['studentId' => $studentId, 'today' => $today]);
-        $ban = $rows[0] ?? null;
+        $ban = $this->activeBanQuery($studentId)->first();
 
         return $this->successResponse('Success', [
             'hasBan' => (bool) $ban,
             'ban' => $ban,
         ]);
+    }
+
+    /** The current date and time on campus, as SQL Server expects it. */
+    public static function campusNow(): string
+    {
+        return Carbon::now(config('features.campus_timezone'))->toDateTimeString();
+    }
+
+    public function activeBanQuery(string $studentId, ?string $now = null)
+    {
+        $now = $now ?? self::campusNow();
+
+        return StudentLeaveBan::query()
+            ->selectRaw('Comment, CONVERT(varchar, FromDate, 100) AS FromDate, CONVERT(varchar, ToDate, 100) AS ToDate')
+            ->where('StudentID', $studentId)
+            ->where('Status', 'A')
+            ->whereRaw('? BETWEEN FromDate AND ToDate', [$now])
+            ->orderByDesc('FromDate');
     }
 
     public function store(Request $request)
@@ -171,7 +184,7 @@ class LeaveRequestController extends Controller
         $startDateTime = $startAt->toDateTimeString();
         $endDateTime = $endAt->toDateTimeString();
 
-        $leaveBan = $this->getStudentLeaveBan($studentId, $startAt->toDateString(), $endAt->toDateString());
+        $leaveBan = $this->getStudentLeaveBan($studentId, $startDateTime, $endDateTime);
         if (!empty($leaveBan)) {
             return $this->successResponse('Leave request blocked', [
                 'result' => 2,
@@ -281,7 +294,7 @@ class LeaveRequestController extends Controller
         $startDateTime = $startAt->toDateTimeString();
         $endDateTime = $endAt->toDateTimeString();
 
-        $leaveBan = $this->getStudentLeaveBan($studentId, $startAt->toDateString(), $endAt->toDateString());
+        $leaveBan = $this->getStudentLeaveBan($studentId, $startDateTime, $endDateTime);
         if (!empty($leaveBan)) {
             return $this->successResponse('Leave request blocked', [
                 'result' => 2,
@@ -407,21 +420,29 @@ class LeaveRequestController extends Controller
         return app(LeaveRuleResolver::class)->ruleFor($studentId);
     }
 
-    private function getStudentLeaveBan(string $studentId, string $startDate, string $endDate): array
+    private function getStudentLeaveBan(string $studentId, string $startDateTime, string $endDateTime): array
+    {
+        return $this->banQuery($studentId, $startDateTime, $endDateTime)->get()->toArray();
+    }
+
+    /**
+     * Active bans whose window overlaps the requested pass.
+     *
+     * FromDate and ToDate are datetimes, and staff enter real times: the most
+     * common ban on record runs 15:30 to 07:00 the next morning, and
+     * residence now enters day bans as 00:05-23:55. The check must therefore
+     * compare the pass window with the ban window, not a bare date. The
+     * previous version compared the pass *date* (midnight) with the ban
+     * columns, so a ban that started at 00:05 was never seen and seven
+     * students left on passes during a ban on 2026-09-25.
+     */
+    public function banQuery(string $studentId, string $startDateTime, string $endDateTime)
     {
         return StudentLeaveBan::query()
             ->where('StudentID', $studentId)
             ->where('Status', 'A')
-            ->where(function ($query) use ($startDate, $endDate) {
-                $query->whereRaw('? BETWEEN FromDate AND ToDate', [$startDate])
-                    ->orWhereRaw('? BETWEEN FromDate AND ToDate', [$endDate])
-                    ->orWhere(function ($query) use ($startDate, $endDate) {
-                        $query->where('FromDate', '<=', $startDate)
-                            ->where('ToDate', '>=', $endDate);
-                    });
-            })
-            ->get()
-            ->toArray();
+            ->where('FromDate', '<=', $endDateTime)
+            ->where('ToDate', '>=', $startDateTime);
     }
 
     /**
