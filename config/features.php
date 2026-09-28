@@ -45,4 +45,19 @@ return [
     'leave_max_hours_senior' => (int) env('LEAVE_MAX_HOURS_SENIOR', 8),
     'leave_junior_hall_marker' => (string) env('LEAVE_JUNIOR_HALL_MARKER', '(Jr.)'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Campus time zone
+    |--------------------------------------------------------------------------
+    |
+    | The application clock is UTC (config/app.php). Anything that asks "is
+    | this ban / rule in force right now" must use campus wall-clock time
+    | instead: tblBHSStudentLeaveBan.FromDate/ToDate are entered in Vancouver
+    | time by residence staff. Added 2026-09-28 after a Friday leave ban was
+    | shown to students on Thursday from 5pm.
+    |
+    */
+
+    'campus_timezone' => (string) env('CAMPUS_TIMEZONE', 'America/Vancouver'),
+
 ];

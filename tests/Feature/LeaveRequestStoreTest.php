@@ -6,6 +6,7 @@ use App\Http\Controllers\LeaveRequestController;
 use App\Models\StudentAuth;
 use App\Services\LeaveRequestEditor;
 use App\Services\LeaveRuleResolver;
+use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -192,6 +193,68 @@ class LeaveRequestStoreTest extends TestCase
         $this->assertMatchesRegularExpression('/.LeaveStatus. = \? and \(.InDate. is null or .InDate. < \?\)/', $sql);
         $this->assertContains('A', $bindings);
         $this->assertContains('1901-01-01', $bindings);
+    }
+
+    public function test_ban_check_compares_the_pass_window_with_the_ban_times(): void
+    {
+        // 2026-09-25: residence entered the day's bans as 00:05-23:55. The
+        // old check compared the bare pass date (midnight) with the ban
+        // columns and never matched, so the passes went through.
+        $query = app(LeaveRequestController::class)
+            ->banQuery('202600081', '2026-09-25 16:00:00', '2026-09-25 18:00:00');
+
+        $sql = $query->toSql();
+        $bindings = $query->getBindings();
+
+        $this->assertMatchesRegularExpression('/.FromDate. <= \?/', $sql);
+        $this->assertMatchesRegularExpression('/.ToDate. >= \?/', $sql);
+        $this->assertStringNotContainsString('between', strtolower($sql));
+        $this->assertContains('2026-09-25 16:00:00', $bindings);
+        $this->assertContains('2026-09-25 18:00:00', $bindings);
+        $this->assertNotContains('2026-09-25', $bindings);
+        $this->assertContains('A', $bindings);
+    }
+
+    public function test_store_passes_the_full_window_to_the_ban_check(): void
+    {
+        $this->actingAsStudent();
+
+        $captured = null;
+        $controller = $this->partialMock(LeaveRequestController::class, function ($mock) use (&$captured) {
+            $mock->shouldReceive('banQuery')->once()->andReturnUsing(function ($studentId, $start, $end) use (&$captured) {
+                $captured = [$studentId, $start, $end];
+                // A ban row: the request must stop here with result 2 and touch nothing else.
+                return new class {
+                    public function get() { return collect([['BanID' => 1]]); }
+                };
+            });
+        });
+
+        $response = $this->postJson('/api/add-leave-request', $this->payload(
+            '2026-09-25 16:00:00',
+            '2026-09-25 18:00:00'
+        ));
+
+        $response->assertOk()->assertJsonPath('data.result', 2);
+        $this->assertSame(['202600081', '2026-09-25 16:00:00', '2026-09-25 18:00:00'], $captured);
+    }
+
+    public function test_current_ban_is_judged_by_campus_time_not_utc(): void
+    {
+        // Thursday 2026-09-24, 4:30pm in Vancouver is already Friday in UTC.
+        // The old check used the UTC date, so a Friday ban showed on Thursday
+        // from 5pm and disappeared at 5pm on Friday.
+        Carbon::setTestNow(Carbon::parse('2026-09-24 23:30:00', 'UTC'));
+        try {
+            $this->assertSame('2026-09-24 16:30:00', LeaveRequestController::campusNow());
+
+            $query = app(LeaveRequestController::class)->activeBanQuery('202600081');
+            $this->assertMatchesRegularExpression('/\? BETWEEN FromDate AND ToDate/', $query->toSql());
+            $this->assertContains('2026-09-24 16:30:00', $query->getBindings());
+            $this->assertNotContains('2026-09-25', $query->getBindings());
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     private function pendingRow(int $leaveId = 5001): object
