@@ -37,16 +37,17 @@ class FormsController extends Controller
 
         try {
             Mail::raw($text, function ($message) use ($subject, $replyTo) {
-                $message->to('chanho.lee@bodwell.edu', 'Chano Lee')
+                $message->from('no-reply@bodwell.edu', 'Bodwell High School')
+                        ->to([
+                            'chanho.lee@bodwell.edu',
+                            'rommel.parungao@bodwell.edu',
+                        ])
                         ->subject('[MyBodwellApp] ' . $subject);
 
-                // Optional: set a from/reply-to that helps you reply directly to the user
+                // Reply-to the student when the account has an email, so a reply goes straight back.
                 if ($replyTo) {
                     $message->replyTo($replyTo);
                 }
-
-                // Optionally set a from if you want something specific:
-                // $message->from('no-reply@bodwell.edu', 'MyBodwell App');
             });
 
             return response()->json([
