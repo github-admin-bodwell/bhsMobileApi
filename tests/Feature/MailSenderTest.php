@@ -10,12 +10,12 @@ use Tests\TestCase;
 
 /**
  * Both emails the API sends must come from no-reply@bodwell.edu (the address the
- * school's SendGrid account sends as) and the contact form must reach both IT staff.
+ * school's SendGrid account sends as) and the contact form must reach the IT helpdesk.
  * Uses the array mailer from phpunit.xml, so no SMTP or SQL Server is needed.
  */
 class MailSenderTest extends TestCase
 {
-    public function test_contact_form_goes_to_both_it_staff_from_no_reply(): void
+    public function test_contact_form_goes_to_helpdesk_from_no_reply(): void
     {
         $student = new StudentAuth();
         $student->UserID = '202600081';
@@ -35,7 +35,7 @@ class MailSenderTest extends TestCase
         $email = $sent[0]->getOriginalMessage();
         $this->assertSame('no-reply@bodwell.edu', $email->getFrom()[0]->getAddress());
         $this->assertSame(
-            ['chanho.lee@bodwell.edu', 'rommel.parungao@bodwell.edu'],
+            ['helpdesk@bodwell.edu'],
             array_map(fn ($a) => $a->getAddress(), $email->getTo())
         );
         $this->assertSame('[MyBodwellApp] Cannot see my schedule', $email->getSubject());
