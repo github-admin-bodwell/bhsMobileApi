@@ -60,9 +60,22 @@ return new class extends Migration {
         //    index key limit on SQL Server 2014 and earlier. 64 + 191 + bigint keeps it
         //    around 518 bytes, which is safe on every version. device_id also becomes
         //    NOT NULL now that step 1 has cleared the nulls.
+        //
+        //    SQL Server refuses to alter a column an index depends on, so the plain
+        //    device_id index from the create migration comes off first and goes back
+        //    on afterwards. SQLite, which the tests run on, does not mind either way,
+        //    which is how this went unnoticed until the first run on SQL Server.
+        Schema::table('device_tokens', function (Blueprint $table) {
+            $table->dropIndex(['device_id']);
+        });
+
         Schema::table('device_tokens', function (Blueprint $table) {
             $table->string('device_id', 64)->change();
             $table->string('tokenable_type', 191)->change();
+        });
+
+        Schema::table('device_tokens', function (Blueprint $table) {
+            $table->index(['device_id']);
         });
 
         // 5. One live token per user per device.
@@ -80,9 +93,18 @@ return new class extends Migration {
             $table->dropUnique('device_tokens_owner_device_unique');
         });
 
+        // Same index dance as up(): SQL Server will not widen an indexed column.
+        Schema::table('device_tokens', function (Blueprint $table) {
+            $table->dropIndex(['device_id']);
+        });
+
         Schema::table('device_tokens', function (Blueprint $table) {
             $table->string('device_id', 255)->nullable()->change();
             $table->string('tokenable_type', 255)->change();
+        });
+
+        Schema::table('device_tokens', function (Blueprint $table) {
+            $table->index(['device_id']);
         });
     }
 };
