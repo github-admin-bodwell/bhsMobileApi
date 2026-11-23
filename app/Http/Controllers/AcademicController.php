@@ -177,7 +177,9 @@ class AcademicController extends Controller
             ->values();
 
         $attendance = DB::table('tblBHSAttendance')
-            ->selectRaw('StudSubjID AS studentCourseId, SUM(AbsencePeriod) AS absenceCount, SUM(LatePeriod) AS lateCount')
+            // Excuse is a 0/1 flag set alongside AbsencePeriod when an absence is excused,
+            // so the admin site's unexcused count is SUM(AbsencePeriod) - SUM(Excuse).
+            ->selectRaw('StudSubjID AS studentCourseId, SUM(AbsencePeriod) AS absenceCount, SUM(LatePeriod) AS lateCount, SUM(COALESCE(Excuse, 0)) AS excusedAbsenceCount')
             ->whereIn('StudSubjID', $studentCourseList)
             ->groupBy('StudSubjID')
             ->get()
@@ -188,6 +190,10 @@ class AcademicController extends Controller
                 $totals = $attendance->get($row->studentCourseId);
                 $row->absenceCount = (int)($totals->absenceCount ?? 0);
                 $row->lateCount    = (int)($totals->lateCount ?? 0);
+                [$row->excusedAbsenceCount, $row->unexcusedAbsenceCount] = self::splitAbsences(
+                    $row->absenceCount,
+                    (int)($totals->excusedAbsenceCount ?? 0)
+                );
 
                 // (Optional) normalize/round the computed rates for the client
                 if (isset($row->courseRateScaled)) {
@@ -322,12 +328,33 @@ class AcademicController extends Controller
         );
     } 
 
+    /**
+     * Split a course's absence total into excused and unexcused the way the admin
+     * site does (unexcused = absences - excused), clamped so the two always add up
+     * to the total even if a row carries Excuse=1 without AbsencePeriod=1.
+     *
+     * @return array{0:int,1:int} [excused, unexcused]
+     */
+    public static function splitAbsences(int $absences, int $excused): array
+    {
+        $absences = max(0, $absences);
+        $excused  = max(0, min($excused, $absences));
+
+        return [ $excused, $absences - $excused ];
+    }
+
     public function getAttendance(Request $request) {
-        $guard = $this->guardAcademicAccess($request);
+        // Optional: a past semester's records (the course detail page asks for the
+        // semester of the course it shows). Defaults to the current semester.
+        $semesterId = $request->query('semester_id', $request->query('semesterId'));
+        $semesterId = is_numeric($semesterId) ? (string)(int)$semesterId : null;
+
+        $guard = $this->guardAcademicAccess($request, $semesterId);
         if ($guard instanceof JsonResponse) {
             return $guard;
         }
         [$studentId, $currentSemester, $bogsEnabled] = $guard;
+        $targetSemesterId = $semesterId !== null ? (int)$semesterId : (int)$currentSemester->SemesterID;
 
         $records = Attendance::select(
                             't.SemesterID',
@@ -342,7 +369,7 @@ class AcademicController extends Controller
                         ->leftJoin('tblBHSStudentSubject as s', 'tblBHSAttendance.StudSubjID', '=', 's.StudSubjID')
                         ->leftJoin('tblBHSSubject as t', 't.SubjectID', '=', 's.SubjectID')
                         ->where('s.StudNum', $studentId)
-                        ->where('t.SemesterID', $currentSemester->SemesterID)
+                        ->where('t.SemesterID', $targetSemesterId)
                         ->where(function ($q) {
                             $q->where('tblBHSAttendance.AbsencePeriod', '!=', 0)
                             ->orWhere('tblBHSAttendance.LatePeriod', '!=', 0);

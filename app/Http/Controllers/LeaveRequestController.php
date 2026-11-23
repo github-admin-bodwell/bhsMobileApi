@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Parents;
 use App\Models\LeaveRequest;
+use App\Services\LeaveRequestEditor;
+use App\Services\LeaveRuleResolver;
 use App\Models\StudentLeaveBan;
 use App\Traits\HttpResponse;
 use Illuminate\Http\Request;
@@ -49,11 +51,12 @@ class LeaveRequestController extends Controller
                 L.ApprovalStaff,
                 CONVERT(varchar, L.SDate, 120) AS StartDate,
                 CONVERT(varchar, L.EDate, 120) AS EndDate,
-                CONVERT(varchar, L.OutDate, 100) AS OutDate,
-                CONVERT(varchar, L.InDate, 100) AS InDate,
-                CONVERT(varchar, L.OutDate, 120) AS OutDateISO,
-                CONVERT(varchar, L.InDate, 120) AS InDateISO,
-                DATEDIFF(minute, L.OutDate, L.InDate) AS OutDurationMinutes,
+                CONVERT(varchar, NULLIF(L.OutDate, '1900-01-01'), 100) AS OutDate,
+                CONVERT(varchar, NULLIF(L.InDate, '1900-01-01'), 100) AS InDate,
+                CONVERT(varchar, NULLIF(L.OutDate, '1900-01-01'), 120) AS OutDateISO,
+                CONVERT(varchar, NULLIF(L.InDate, '1900-01-01'), 120) AS InDateISO,
+                DATEDIFF(minute, NULLIF(L.OutDate, '1900-01-01'), NULLIF(L.InDate, '1900-01-01')) AS OutDurationMinutes,
+                CASE WHEN L.LeaveStatus = 'P' AND (L.OutDate IS NULL OR L.OutDate < '1901-01-01') THEN 1 ELSE 0 END AS CanEdit,
                 CONVERT(varchar, L.SDate, 100) AS SDate,
                 CONVERT(varchar, L.EDate, 100) AS EDate,
                 CONCAT(S.FirstName, ' ', S.LastName) AS StaffFullName
@@ -109,6 +112,15 @@ class LeaveRequestController extends Controller
         return $this->successResponse('Success', $payload);
     }
 
+    /**
+     * GET /get-leave-ban — the ban in force for the student at this moment,
+     * for the card and the disabled Create button on the leave list screen.
+     *
+     * "This moment" is campus wall-clock time. The app runs on UTC, and
+     * Vancouver is 7 or 8 hours behind it, so a UTC date turned every ban on
+     * at 4 or 5pm the day before and off at 4 or 5pm on the day itself
+     * (reported 2026-09-28: "a message on Thursday for a Friday ban").
+     */
     public function currentBan(Request $request)
     {
         $user = $request->user();
@@ -118,26 +130,30 @@ class LeaveRequestController extends Controller
             return $this->errorResponse('Missing studentId', [], null, 422);
         }
 
-        $today = Carbon::now()->toDateString();
-
-        $sql = "
-            SELECT TOP 1
-                Comment,
-                CONVERT(varchar, FromDate, 100) AS FromDate,
-                CONVERT(varchar, ToDate, 100) AS ToDate
-            FROM tblBHSStudentLeaveBan
-            WHERE StudentID = :studentId
-              AND Status = 'A'
-              AND :today BETWEEN FromDate AND ToDate
-            ORDER BY FromDate DESC";
-
-        $rows = DB::select($sql, ['studentId' => $studentId, 'today' => $today]);
-        $ban = $rows[0] ?? null;
+        $ban = $this->activeBanQuery($studentId)->first();
 
         return $this->successResponse('Success', [
             'hasBan' => (bool) $ban,
             'ban' => $ban,
         ]);
+    }
+
+    /** The current date and time on campus, as SQL Server expects it. */
+    public static function campusNow(): string
+    {
+        return Carbon::now(config('features.campus_timezone'))->toDateTimeString();
+    }
+
+    public function activeBanQuery(string $studentId, ?string $now = null)
+    {
+        $now = $now ?? self::campusNow();
+
+        return StudentLeaveBan::query()
+            ->selectRaw('Comment, CONVERT(varchar, FromDate, 100) AS FromDate, CONVERT(varchar, ToDate, 100) AS ToDate')
+            ->where('StudentID', $studentId)
+            ->where('Status', 'A')
+            ->whereRaw('? BETWEEN FromDate AND ToDate', [$now])
+            ->orderByDesc('FromDate');
     }
 
     public function store(Request $request)
@@ -161,30 +177,14 @@ class LeaveRequestController extends Controller
         $startAt = Carbon::parse($data['startDate']);
         $endAt = Carbon::parse($data['endDate']);
 
-        if ($endAt->lte($startAt)) {
-            return $this->errorResponse('endDate must be after startDate', [
-                'code' => 'leave_end_before_start',
-            ], null, 422);
-        }
-
-        $maxHours = max(1, (int) config('features.leave_max_hours', 12));
-        if (!$endAt->isSameDay($startAt)) {
-            return $this->errorResponse('A leave request must start and end on the same day', [
-                'code' => 'leave_not_same_day',
-                'maxHours' => $maxHours,
-            ], null, 422);
-        }
-        if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
-            return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
-                'code' => 'leave_duration_exceeded',
-                'maxHours' => $maxHours,
-            ], null, 422);
+        if ($rejection = $this->windowRejection($studentId, $startAt, $endAt)) {
+            return $rejection;
         }
 
         $startDateTime = $startAt->toDateTimeString();
         $endDateTime = $endAt->toDateTimeString();
 
-        $leaveBan = $this->getStudentLeaveBan($studentId, $startAt->toDateString(), $endAt->toDateString());
+        $leaveBan = $this->getStudentLeaveBan($studentId, $startDateTime, $endDateTime);
         if (!empty($leaveBan)) {
             return $this->successResponse('Leave request blocked', [
                 'result' => 2,
@@ -196,14 +196,14 @@ class LeaveRequestController extends Controller
         if (!empty($conflicts)) {
             // 4xx responses are not logged by the framework; without this line a
             // student who is stuck behind an old request is invisible in the log.
-            Log::warning('Leave request rejected: overlaps an existing request', [
+            Log::warning('Leave request rejected: overlaps a pending or in-progress request', [
                 'studentId' => $studentId,
                 'startDate' => $startDateTime,
                 'endDate' => $endDateTime,
                 'conflicts' => array_column($conflicts, 'LeaveID'),
             ]);
 
-            return $this->errorResponse('Leave request conflicts with an existing request', [
+            return $this->errorResponse('Leave request overlaps a pass that is not finished yet', [
                 'code' => 'leave_conflict',
                 'conflicts' => $conflicts,
             ], null, 409);
@@ -230,28 +230,255 @@ class LeaveRequestController extends Controller
         ], 201);
     }
 
-    private function getStudentLeaveBan(string $studentId, string $startDate, string $endDate): array
+    /**
+     * The same-day / hour-limit checks shared by create and update. Null when
+     * the window is acceptable, otherwise the 422 to send back.
+     */
+    private function windowRejection(string $studentId, Carbon $startAt, Carbon $endAt)
+    {
+        if ($endAt->lte($startAt)) {
+            return $this->errorResponse('endDate must be after startDate', [
+                'code' => 'leave_end_before_start',
+            ], null, 422);
+        }
+
+        $rule = $this->leaveRule($studentId);
+        $maxHours = $rule['maxHours'];
+        if (!$endAt->isSameDay($startAt)) {
+            return $this->errorResponse('A leave request must start and end on the same day', [
+                'code' => 'leave_not_same_day',
+            ] + $rule, null, 422);
+        }
+        if ($endAt->gt($startAt->copy()->addHours($maxHours))) {
+            return $this->errorResponse("A leave request can last at most {$maxHours} hours", [
+                'code' => 'leave_duration_exceeded',
+            ] + $rule, null, 422);
+        }
+
+        return null;
+    }
+
+    /**
+     * POST /update-leave-request — a student changes the window or text of
+     * their own request while it is still pending and not signed out.
+     */
+    public function update(Request $request)
+    {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        $data = $request->validate([
+            'leaveId' => ['required', 'integer'],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date'],
+            'comment' => ['nullable', 'string'],
+            'doing' => ['nullable', 'string'],
+        ]);
+        $leaveId = (int) $data['leaveId'];
+
+        $editor = app(LeaveRequestEditor::class);
+        $row = $editor->findEditable($studentId, $leaveId);
+        if (!$row) {
+            return $this->notEditable($studentId, $leaveId, 'update');
+        }
+
+        $startAt = Carbon::parse($data['startDate']);
+        $endAt = Carbon::parse($data['endDate']);
+        if ($rejection = $this->windowRejection($studentId, $startAt, $endAt)) {
+            return $rejection;
+        }
+
+        $startDateTime = $startAt->toDateTimeString();
+        $endDateTime = $endAt->toDateTimeString();
+
+        $leaveBan = $this->getStudentLeaveBan($studentId, $startDateTime, $endDateTime);
+        if (!empty($leaveBan)) {
+            return $this->successResponse('Leave request blocked', [
+                'result' => 2,
+                'leaveBans' => $leaveBan,
+            ]);
+        }
+
+        $conflicts = $this->conflictQuery($studentId, $startDateTime, $endDateTime)
+            ->where('LeaveID', '<>', $leaveId)
+            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
+            ->toArray();
+        if (!empty($conflicts)) {
+            Log::warning('Leave request update rejected: overlaps a pending or in-progress request', [
+                'studentId' => $studentId,
+                'leaveId' => $leaveId,
+                'startDate' => $startDateTime,
+                'endDate' => $endDateTime,
+                'conflicts' => array_column($conflicts, 'LeaveID'),
+            ]);
+
+            return $this->errorResponse('Leave request overlaps a pass that is not finished yet', [
+                'code' => 'leave_conflict',
+                'conflicts' => $conflicts,
+            ], null, 409);
+        }
+
+        $changed = $editor->update($studentId, $leaveId, [
+            'SDate' => $startDateTime,
+            'EDate' => $endDateTime,
+            'ToDo' => $data['doing'] ?? '',
+            'Comment' => $data['comment'] ?? '',
+        ]);
+        if ($changed === 0) {
+            return $this->notEditable($studentId, $leaveId, 'update');
+        }
+
+        Log::info('Leave request updated by student', [
+            'studentId' => $studentId,
+            'leaveId' => $leaveId,
+            'from' => [$row->SDate, $row->EDate],
+            'to' => [$startDateTime, $endDateTime],
+        ]);
+
+        return $this->successResponse('Leave request updated', [
+            'result' => 1,
+            'leaveRequestId' => $leaveId,
+        ]);
+    }
+
+    /**
+     * POST /cancel-leave-request — a student withdraws their own request
+     * while it is still pending and not signed out. The row is deleted;
+     * the window is logged so there is a trace.
+     */
+    public function cancel(Request $request)
+    {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        $data = $request->validate([
+            'leaveId' => ['required', 'integer'],
+        ]);
+        $leaveId = (int) $data['leaveId'];
+
+        $editor = app(LeaveRequestEditor::class);
+        $row = $editor->findEditable($studentId, $leaveId);
+        if (!$row) {
+            return $this->notEditable($studentId, $leaveId, 'cancel');
+        }
+
+        if ($editor->delete($studentId, $leaveId) === 0) {
+            return $this->notEditable($studentId, $leaveId, 'cancel');
+        }
+
+        Log::info('Leave request cancelled by student', [
+            'studentId' => $studentId,
+            'leaveId' => $leaveId,
+            'window' => [$row->SDate, $row->EDate],
+            'toDo' => $row->ToDo,
+        ]);
+
+        return $this->successResponse('Leave request cancelled', [
+            'result' => 1,
+            'leaveRequestId' => $leaveId,
+        ]);
+    }
+
+    private function notEditable(string $studentId, int $leaveId, string $action)
+    {
+        // 4xx responses are not logged by the framework.
+        Log::info("Leave request {$action} refused: not pending or already signed out", [
+            'studentId' => $studentId,
+            'leaveId' => $leaveId,
+        ]);
+
+        return $this->errorResponse('This leave request can no longer be changed', [
+            'code' => 'leave_not_editable',
+        ], null, 409);
+    }
+
+    /**
+     * GET /get-leave-rule — the same-day hour limit that applies to the
+     * signed-in student, so the app can check locally with the right number.
+     */
+    public function rule(Request $request)
+    {
+        $user = $request->user();
+        $studentId = $user->StudentID ?? $user->UserID ?? $request->input('studentId');
+        if (!$studentId) {
+            return $this->errorResponse('Missing studentId', [], null, 422);
+        }
+
+        return $this->successResponse('Success', $this->leaveRule($studentId));
+    }
+
+    private function leaveRule(string $studentId): array
+    {
+        // Resolved from the container at call time so tests can stand in the
+        // hall lookup without a SQL Server.
+        return app(LeaveRuleResolver::class)->ruleFor($studentId);
+    }
+
+    private function getStudentLeaveBan(string $studentId, string $startDateTime, string $endDateTime): array
+    {
+        return $this->banQuery($studentId, $startDateTime, $endDateTime)->get()->toArray();
+    }
+
+    /**
+     * Active bans whose window overlaps the requested pass.
+     *
+     * FromDate and ToDate are datetimes, and staff enter real times: the most
+     * common ban on record runs 15:30 to 07:00 the next morning, and
+     * residence now enters day bans as 00:05-23:55. The check must therefore
+     * compare the pass window with the ban window, not a bare date. The
+     * previous version compared the pass *date* (midnight) with the ban
+     * columns, so a ban that started at 00:05 was never seen and seven
+     * students left on passes during a ban on 2026-09-25.
+     */
+    public function banQuery(string $studentId, string $startDateTime, string $endDateTime)
     {
         return StudentLeaveBan::query()
             ->where('StudentID', $studentId)
             ->where('Status', 'A')
-            ->where(function ($query) use ($startDate, $endDate) {
-                $query->whereRaw('? BETWEEN FromDate AND ToDate', [$startDate])
-                    ->orWhereRaw('? BETWEEN FromDate AND ToDate', [$endDate])
-                    ->orWhere(function ($query) use ($startDate, $endDate) {
-                        $query->where('FromDate', '<=', $startDate)
-                            ->where('ToDate', '>=', $endDate);
-                    });
-            })
-            ->get()
-            ->toArray();
+            ->where('FromDate', '<=', $endDateTime)
+            ->where('ToDate', '>=', $startDateTime);
     }
+
+    /**
+     * Statuses that still block a new request for an overlapping window.
+     *
+     * SPAdmin (boarding/?page=leave) saves a record as I once OutDate is set and
+     * as A once InDate is set too, so A normally means the student has signed
+     * back in and the pass is finished. Staff can also pick "Approved" in the
+     * modal before the student leaves; that row has no sign-in yet and must
+     * still block. R is rejected. An empty date is stored as 1900-01-01.
+     */
+    public const BLOCKING_LEAVE_STATUSES = ['P', 'I'];
+    public const NO_DATE_PLACEHOLDER = '1901-01-01';
 
     private function getLeaveRequestConflicts(string $studentId, string $startDateTime, string $endDateTime): array
     {
+        return $this->conflictQuery($studentId, $startDateTime, $endDateTime)
+            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
+            ->toArray();
+    }
+
+    public function conflictQuery(string $studentId, string $startDateTime, string $endDateTime)
+    {
         return LeaveRequest::query()
             ->where('StudentID', $studentId)
-            ->where('LeaveStatus', '<>', 'R')
+            ->where(function ($query) {
+                $query->whereIn('LeaveStatus', self::BLOCKING_LEAVE_STATUSES)
+                    ->orWhere(function ($query) {
+                        // Approved on the desktop but not signed back in.
+                        $query->where('LeaveStatus', 'A')
+                            ->where(function ($query) {
+                                $query->whereNull('InDate')
+                                    ->orWhere('InDate', '<', self::NO_DATE_PLACEHOLDER);
+                            });
+                    });
+            })
             ->where(function ($query) use ($startDateTime, $endDateTime) {
                 $query->whereBetween('SDate', [$startDateTime, $endDateTime])
                     ->orWhereBetween('EDate', [$startDateTime, $endDateTime])
@@ -259,8 +486,6 @@ class LeaveRequestController extends Controller
                         $query->where('SDate', '<=', $startDateTime)
                             ->where('EDate', '>=', $endDateTime);
                     });
-            })
-            ->get(['LeaveID', 'SDate', 'EDate', 'LeaveStatus'])
-            ->toArray();
+            });
     }
 }

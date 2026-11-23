@@ -35,7 +35,7 @@ class SelfSubmitHoursApprovalMail extends Mailable
 
     public function build()
     {
-        return $this->from('heldesk@bodwell.edu', 'BHS IT Help Desk')
+        return $this->from('no-reply@bodwell.edu', 'Bodwell High School')
             ->subject("Self-submitted hours - {$this->studentName}")
             ->view('emails.self_submit_hours_approval');
     }

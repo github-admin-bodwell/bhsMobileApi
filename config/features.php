@@ -21,22 +21,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Leave request maximum duration (hours, same day)
+    | Leave request maximum duration (hours, same day, by hall)
     |--------------------------------------------------------------------------
     |
-    | Residence rule as of 2026-09-03: a campus leave request from the app
-    | starts and ends on the same day and lasts at most this many hours.
-    | Anything longer goes through a separate process outside the app.
+    | Residence rule as of 2026-09-09: a campus leave request from the app
+    | starts and ends on the same day and lasts at most 6 hours for a Junior
+    | student or 8 hours for a Senior one. Longer same-day leave goes through
+    | Boarding Admin; overnight leave goes through the AWP system. The first
+    | version of this rule (2026-09-03) was a flat 12 hours.
+    |
+    | Junior is decided by hall: tblBHSHomestay.Halls names three halls with a
+    | "(Jr.)" suffix (Courage West, Harmony East, Unity East). A student with
+    | no hall on record is treated as Junior, the stricter limit, and logged.
     |
     | POST /add-leave-request answers 422 with code "leave_not_same_day" or
-    | "leave_duration_exceeded" (plus maxHours). The first version of this
-    | guard was a 5-day cap, added after a student submitted a one-year leave
-    | by flicking the year wheel on the iOS picker; once approved it blocked
-    | every later request through the overlap check. The mobile client
-    | enforces the same rule, so keep the two in step.
+    | "leave_duration_exceeded" plus maxHours, tier, juniorHours and
+    | seniorHours. GET /get-leave-rule returns the same for the signed-in
+    | student so the app can check locally with the right number.
     |
     */
 
-    'leave_max_hours' => (int) env('LEAVE_MAX_HOURS', 12),
+    'leave_max_hours_junior' => (int) env('LEAVE_MAX_HOURS_JUNIOR', 6),
+    'leave_max_hours_senior' => (int) env('LEAVE_MAX_HOURS_SENIOR', 8),
+    'leave_junior_hall_marker' => (string) env('LEAVE_JUNIOR_HALL_MARKER', '(Jr.)'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Campus time zone
+    |--------------------------------------------------------------------------
+    |
+    | The application clock is UTC (config/app.php). Anything that asks "is
+    | this ban / rule in force right now" must use campus wall-clock time
+    | instead: tblBHSStudentLeaveBan.FromDate/ToDate are entered in Vancouver
+    | time by residence staff. Added 2026-09-28 after a Friday leave ban was
+    | shown to students on Thursday from 5pm.
+    |
+    */
+
+    'campus_timezone' => (string) env('CAMPUS_TIMEZONE', 'America/Vancouver'),
 
 ];
