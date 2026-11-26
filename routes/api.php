@@ -12,6 +12,7 @@ use App\Http\Controllers\DeviceTokenController;
 use App\Http\Controllers\FbAuthController;
 use App\Http\Controllers\FeedController;
 use App\Http\Controllers\PostController;
+use App\Http\Controllers\PushTokenController;
 use App\Http\Controllers\ReactionController;
 use App\Http\Controllers\StudentLifeController;
 use App\Http\Controllers\StaffController;
@@ -128,5 +129,10 @@ Route::middleware(['auth:sanctum', 'as.json'])->group(function() {
     Route::get('get-meal', [MealFeedbackController::class, 'getMeal']);
     Route::get('get-feedback', [MealFeedbackController::class, 'getFeedback']);
     Route::post('add-feedback', [MealFeedbackController::class, 'addFeedback']);
+
+    // Push notifications (config/push.php, off until PUSH_NOTIFICATIONS_ENABLED=true)
+    Route::get('push/config', [PushTokenController::class, 'config']);
+    Route::post('push/register', [PushTokenController::class, 'register']);
+    Route::post('push/unregister', [PushTokenController::class, 'unregister']);
 
 });
